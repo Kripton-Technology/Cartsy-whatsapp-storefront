@@ -1,0 +1,221 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root, html.dark {
+  /* ── User Defined Custom CSS Palette ── */
+  --tea-green: #c5efcb;
+  --dusty-olive: #647a67;
+  --black: #020402;
+  --carbon-black: #1f241f;
+  --charcoal-brown: #3c433b;
+  --dusty-olive-2: #758173;
+  --muted-teal: #8fa38a;
+  --celadon: #a9c5a0;
+  --celadon-2: #b8d2b3;
+  --tea-green-2: #c6dec6;
+
+  /* ── Dark Theme (Dokani Dashboard Aesthetic) ── */
+  /* RGB values for Tailwind opacity syntax (e.g. bg-brand-dark/95) */
+  --color-brand-dark-rgb: 2 4 2;              /* #020402 deep black canvas */
+  --color-brand-card-rgb: 31 36 31;           /* #1f241f solid matte carbon-black card surface */
+  --color-brand-steel-rgb: 60 67 59;          /* #3c433b charcoal-brown borders and dividers */
+  --color-brand-slate-rgb: 143 163 138;       /* #8fa38a muted-teal secondary & helper text */
+  --color-brand-gray-rgb: 184 210 179;        /* #b8d2b3 celadon-2 body text */
+  --color-brand-bronze-rgb: 100 122 103;      /* #647a67 dusty-olive secondary accents */
+  --color-brand-cream-rgb: 197 239 203;       /* #c5efcb tea-green primary accent */
+  --color-text-header-rgb: 255 255 255;       /* #ffffff crisp white headers */
+
+  /* Direct CSS values for non-tailwind components */
+  --color-brand-dark: #020402;
+  --color-brand-card: #1f241f;
+  --color-brand-steel: #3c433b;
+  --color-brand-slate: #8fa38a;
+  --color-brand-gray: #b8d2b3;
+  --color-brand-bronze: #647a67;
+  --color-brand-cream: #c5efcb;
+  --color-text-header: #ffffff;
+
+  /* Dokani Solid Surface tokens (replacing translucent blurry glass) */
+  --glass-bg: #1f241f;
+  --glass-bg-hover: #262c26;
+  --glass-border: #3c433b;
+  --glass-border-glow: #c5efcb;
+
+  --scrollbar-track: #020402;
+  --scrollbar-thumb: #3c433b;
+  --scrollbar-thumb-hover: #758173;
+
+  color-scheme: dark;
+}
+
+html.light {
+  /* ── User Defined Custom CSS Palette ── */
+  --tea-green: #c5efcb;
+  --dusty-olive: #647a67;
+  --black: #020402;
+  --carbon-black: #1f241f;
+  --charcoal-brown: #3c433b;
+  --dusty-olive-2: #758173;
+  --muted-teal: #8fa38a;
+  --celadon: #a9c5a0;
+  --celadon-2: #b8d2b3;
+  --tea-green-2: #c6dec6;
+
+  /* ── Light Theme (Clean Celadon & Carbon Aesthetic) ── */
+  --color-brand-dark-rgb: 242 246 242;        /* #f2f6f2 soft celadon canvas */
+  --color-brand-card-rgb: 255 255 255;        /* #ffffff crisp white card surface */
+  --color-brand-steel-rgb: 184 210 179;       /* #b8d2b3 celadon-2 borders & outlines */
+  --color-brand-slate-rgb: 100 122 103;       /* #647a67 dusty-olive secondary text */
+  --color-brand-gray-rgb: 31 36 31;           /* #1f241f carbon-black body text */
+  --color-brand-bronze-rgb: 60 67 59;         /* #3c433b charcoal-brown */
+  --color-brand-cream-rgb: 46 91 56;          /* #2e5b38 deep rich forest olive highlight */
+  --color-text-header-rgb: 2 4 2;             /* #020402 deep black header */
+
+  --color-brand-dark: #f2f6f2;
+  --color-brand-card: #ffffff;
+  --color-brand-steel: #b8d2b3;
+  --color-brand-slate: #647a67;
+  --color-brand-gray: #1f241f;
+  --color-brand-bronze: #3c433b;
+  --color-brand-cream: #2e5b38;
+  --color-text-header: #020402;
+
+  --glass-bg: #ffffff;
+  --glass-bg-hover: #f5f9f5;
+  --glass-border: #b8d2b3;
+  --glass-border-glow: #647a67;
+
+  --scrollbar-track: #f2f6f2;
+  --scrollbar-thumb: #b8d2b3;
+  --scrollbar-thumb-hover: #758173;
+
+  color-scheme: light;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background-color: var(--color-brand-dark);
+  color: var(--color-brand-gray);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Outfit', sans-serif;
+  color: var(--color-text-header);
+  transition: color 0.2s ease;
+}
+
+/* ── Dokani Solid Surface Panels (removing blurry glass look) ── */
+.glass-panel {
+  background: var(--color-brand-card);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.glass-card {
+  background: var(--color-brand-card);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.4);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: all 0.2s ease;
+}
+
+.glass-card:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-glow);
+}
+
+/* Disable heavy blurry glassmorphism globally so UI is crisp, solid, and modern like Dokani */
+.backdrop-blur-none,
+.backdrop-blur-xs,
+.backdrop-blur-sm,
+.backdrop-blur-md,
+.backdrop-blur-lg,
+.backdrop-blur-xl,
+.backdrop-blur-2xl,
+.backdrop-blur-3xl {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Dokani-style Solid Cards in Dark Mode */
+html.dark .bg-brand-steel\/10,
+html.dark .bg-brand-steel\/15 {
+  background-color: var(--carbon-black) !important;
+}
+
+html.dark .bg-brand-steel\/20,
+html.dark .bg-brand-steel\/25 {
+  background-color: #262c26 !important;
+}
+
+html.dark .bg-brand-steel\/5 {
+  background-color: rgba(31, 36, 31, 0.6) !important;
+}
+
+html.dark .border-brand-steel\/10,
+html.dark .border-brand-steel\/15,
+html.dark .border-brand-steel\/20,
+html.dark .border-brand-steel\/25,
+html.dark .border-brand-steel\/30 {
+  border-color: var(--charcoal-brown) !important;
+}
+
+/* Dokani-style Solid Cards in Light Mode */
+html.light .bg-brand-steel\/10 {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.04) !important;
+}
+
+html.light .bg-brand-steel\/15 {
+  background-color: #f7faf7 !important;
+}
+
+html.light .bg-brand-steel\/20 {
+  background-color: #edf5ed !important;
+}
+
+html.light .border-brand-steel\/10,
+html.light .border-brand-steel\/15,
+html.light .border-brand-steel\/20,
+html.light .border-brand-steel\/25,
+html.light .border-brand-steel\/30 {
+  border-color: var(--celadon-2) !important;
+}
+
+/* Custom premium scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track, transparent);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1) translate(0, 0);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.1) translate(10px, -10px);
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 10s infinite ease-in-out;
+}

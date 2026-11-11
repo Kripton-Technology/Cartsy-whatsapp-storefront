@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Allow: /store/
+
+# Disallow private/admin areas
+Disallow: /admin
+Disallow: /admin/
+Disallow: /superadmin
+Disallow: /superadmin/
+
+# Sitemap location — update YOURDOMAIN to your real domain
+Sitemap: https://YOURDOMAIN.com/sitemap.xml
+
