@@ -1,4 +1,5 @@
 import { MessageCircle, MapPin, Facebook, Instagram, GraduationCap } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import type { BusinessInfo } from '../lib/types';
 
 interface FooterProps {
@@ -70,6 +71,15 @@ export function Footer({ business }: FooterProps) {
           <p className="text-slate-400 text-center text-xs mt-2">
             Powered by Cartsy
           </p>
+          <div className="flex items-center justify-center gap-3 text-xs font-semibold text-slate-500 mt-2">
+            <Link to="/track" className="hover:text-slate-900 hover:underline">
+              Track Your Order
+            </Link>
+            <span>•</span>
+            <Link to="/" className="hover:text-slate-900 hover:underline">
+              Explore Stores
+            </Link>
+          </div>
           {(business as any).is_sponsored && (
             <div className="flex items-center justify-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full mt-3 font-semibold mx-auto w-fit">
               <GraduationCap className="w-4 h-4 text-emerald-600" />

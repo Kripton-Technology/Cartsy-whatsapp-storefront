@@ -33,6 +33,7 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    cache: 'no-store',
     ...options,
     credentials: 'include',
     headers,
@@ -125,8 +126,8 @@ export const publicApi = {
       return { success: false };
     }
   },
-  trackOrder: (publicToken: string) =>
-    apiRequest<Order>(`/api/orders/track/${publicToken}`),
+  trackOrder: (identifier: string) =>
+    apiRequest<Order & { events?: Array<{ status: string; created_at: string }>; business_name?: string; whatsapp_number?: string; store_slug?: string }>(`/api/orders/track/${encodeURIComponent(identifier)}`),
 };
 
 export const authApi = {

@@ -63,6 +63,10 @@ export function rewriteResponseCookie(cookie: string, isSecure: boolean): string
     if (partLower.startsWith('domain=')) {
       continue;
     }
+    // Skip Path (we will set Path=/ uniformly)
+    if (partLower.startsWith('path=')) {
+      continue;
+    }
     // Skip SameSite (we will append our own)
     if (partLower.startsWith('samesite=')) {
       continue;
@@ -81,6 +85,8 @@ export function rewriteResponseCookie(cookie: string, isSecure: boolean): string
     }
   }
   
+  rewrittenParts.push('Path=/');
+
   if (isSecure) {
     rewrittenParts.push('Secure');
     rewrittenParts.push('SameSite=Lax');

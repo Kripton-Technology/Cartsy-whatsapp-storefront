@@ -1,4 +1,5 @@
-import { MessageCircle, ShoppingCart } from 'lucide-react';
+import { MessageCircle, ShoppingCart, Truck } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import type { BusinessInfo } from '../lib/types';
 
 interface NavbarProps {
@@ -39,6 +40,15 @@ export function Navbar({ business, cartItemsCount, onCartClick }: NavbarProps) {
             </div>
           </div>
           <div className="flex-shrink-0 flex items-center gap-2">
+            <Link
+              to="/track"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 rounded-xl transition-colors border border-slate-200 shadow-xs"
+              title="Track your order status"
+            >
+              <Truck size={16} className="text-emerald-600" />
+              <span className="hidden sm:inline">Track Order</span>
+            </Link>
+
             <button
               onClick={onCartClick}
               className="relative flex items-center justify-center w-10 h-10 text-slate-700 bg-white hover:bg-slate-50 rounded-xl transition-colors border border-slate-200 shadow-xs"

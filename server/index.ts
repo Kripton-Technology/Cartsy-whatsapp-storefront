@@ -875,15 +875,17 @@ app.post('/api/orders/backup', async (req, res, next) => {
   }
 });
 
-app.get('/api/orders/track/:publicToken', async (req, res, next) => {
+app.get('/api/orders/track/:identifier', async (req, res, next) => {
   try {
-    const { publicToken } = req.params;
+    const { identifier } = req.params;
+    const cleanId = String(identifier || '').trim();
     const rows = await query<any>(
-      `SELECT o.*, s.business_name, s.whatsapp_number, s.slug as store_slug
+      `SELECT o.*, s.business_name, s.whatsapp_number, s.slug as store_slug, s.logo_url as store_logo
        FROM orders o
        JOIN stores s ON s.id = o.store_id
-       WHERE o.public_token = $1 LIMIT 1`,
-      [publicToken]
+       WHERE o.public_token = $1 OR UPPER(o.order_number) = UPPER($1)
+       LIMIT 1`,
+      [cleanId]
     );
 
     if (rows.length === 0) {
@@ -891,7 +893,16 @@ app.get('/api/orders/track/:publicToken', async (req, res, next) => {
       return;
     }
 
-    res.json(rows[0]);
+    const order = rows[0];
+    const events = await query<any>(
+      `SELECT status, created_at FROM order_events WHERE order_id = $1 ORDER BY created_at ASC`,
+      [order.id]
+    ).catch(() => []);
+
+    res.json({
+      ...order,
+      events,
+    });
   } catch (error) {
     next(error);
   }
@@ -900,6 +911,13 @@ app.get('/api/orders/track/:publicToken', async (req, res, next) => {
 app.get('/api/auth/session', getSession);
 app.post('/api/auth/login', login);
 app.post('/api/auth/logout', (_req, res) => res.status(204).end());
+
+app.use(['/api/admin', '/api/auth'], (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
 
 app.use('/api/admin', requireUser);
 

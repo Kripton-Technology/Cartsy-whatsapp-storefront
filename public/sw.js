@@ -1,10 +1,15 @@
 self.addEventListener('push', (event) => {
-  let data = { title: 'New Cartsy Order', body: 'You have received a new order!', url: '/admin/orders' };
+  let data = {
+    title: 'New Cartsy Order! 🛍️',
+    body: 'You have received a new order on Cartsy.',
+    url: '/admin/orders',
+  };
+
   try {
     if (event.data) {
       data = Object.assign(data, event.data.json());
     }
-  } catch (e) {
+  } catch {
     if (event.data) {
       data.body = event.data.text();
     }
@@ -16,8 +21,9 @@ self.addEventListener('push', (event) => {
       icon: '/pwa-192x192.png',
       badge: '/pwa-192x192.png',
       data: { url: data.url || '/admin/orders' },
-      tag: 'cartsy-order',
+      tag: 'cartsy-order-' + Date.now(),
       renotify: true,
+      vibrate: [200, 100, 200],
     })
   );
 });

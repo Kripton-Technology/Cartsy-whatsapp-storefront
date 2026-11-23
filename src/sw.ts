@@ -1,13 +1,25 @@
 /// <reference lib="webworker" />
+import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+
 declare let self: ServiceWorkerGlobalScope;
 
+// Precache static assets built by Vite
+cleanupOutdatedCaches();
+precacheAndRoute(self.__WB_MANIFEST || []);
+
+// ── Background Web Push Notification Listener (PW-2, PW-3) ──
 self.addEventListener('push', (event: any) => {
-  let data = { title: 'New Cartsy Order', body: 'You have received a new order!', url: '/admin/orders' };
+  let data = {
+    title: 'New Cartsy Order! 🛍️',
+    body: 'You have received a new order on Cartsy.',
+    url: '/admin/orders',
+  };
+
   try {
     if (event.data) {
       data = { ...data, ...event.data.json() };
     }
-  } catch (e) {
+  } catch {
     if (event.data) {
       data.body = event.data.text();
     }
@@ -19,12 +31,14 @@ self.addEventListener('push', (event: any) => {
       icon: '/pwa-192x192.png',
       badge: '/pwa-192x192.png',
       data: { url: data.url || '/admin/orders' },
-      tag: 'cartsy-order',
+      tag: 'cartsy-order-' + Date.now(),
       renotify: true,
+      vibrate: [200, 100, 200],
     } as NotificationOptions)
   );
 });
 
+// ── Click Notification to Open Store Admin ──
 self.addEventListener('notificationclick', (event: any) => {
   event.notification.close();
   const urlToOpen = event.notification.data?.url || '/admin/orders';

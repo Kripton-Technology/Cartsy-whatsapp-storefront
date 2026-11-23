@@ -64,9 +64,10 @@ export function AdminLayout() {
     const handleSignOut = async () => {
         try {
             await signOut();
-            navigate('/admin/login', { replace: true });
+            window.location.href = '/admin/login';
         } catch (error) {
             console.error('Error signing out:', error);
+            window.location.href = '/admin/login';
         }
     };
 

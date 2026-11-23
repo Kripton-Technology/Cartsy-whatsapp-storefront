@@ -84,6 +84,48 @@ export function Orders() {
     return createdAt < fiveMinutesAgo;
   };
 
+  const sendWhatsAppStatusUpdate = (order: Order) => {
+    if (!order.customer_phone) {
+      alert('This customer did not provide a phone number.');
+      return;
+    }
+
+    let phone = order.customer_phone.replace(/[^0-9]/g, '');
+    if (phone.startsWith('0') && phone.length === 10) {
+      phone = '233' + phone.slice(1);
+    }
+
+    let statusDesc = '';
+    switch (order.status) {
+      case 'Received':
+        statusDesc = 'We have confirmed and received your order! 🙌';
+        break;
+      case 'Preparing':
+        statusDesc = 'Your items are being prepared and packaged with care. 📦';
+        break;
+      case 'Ready':
+        statusDesc = 'Your order is ready for pickup or dispatch! 🛍️';
+        break;
+      case 'Out for delivery':
+        statusDesc = 'Your order is on the way to your delivery location! 🚚';
+        break;
+      case 'Completed':
+        statusDesc = 'Your order has been completed! We hope you love your purchase. ✨';
+        break;
+      case 'Cancelled':
+        statusDesc = 'Your order has been cancelled. Please contact us for details.';
+        break;
+      default:
+        statusDesc = 'Your order is currently marked as ' + order.status + '.';
+    }
+
+    const trackUrl = `${window.location.origin}/track?order=${order.order_number}`;
+    const text = `👋 Hi *${order.customer_name}*,\n\nUpdate on your order *#${order.order_number}*:\nStatus: *${order.status}*\n\n${statusDesc}\n\n🔍 *Track your order in real-time here:*\n${trackUrl}\n\nThank you for shopping with us!`;
+
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
+  };
+
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
       case 'New':
@@ -260,6 +302,19 @@ export function Orders() {
                         <MapPin className="w-3 h-3 shrink-0 text-slate-400" />
                         <span className="truncate max-w-[220px]">{order.location}</span>
                       </p>
+                      {order.customer_phone && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sendWhatsAppStatusUpdate(order);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-0.5 rounded-lg border border-emerald-200 transition-colors mt-1"
+                          title="Send WhatsApp update to customer"
+                        >
+                          <MessageCircle className="w-3 h-3" /> WhatsApp Update
+                        </button>
+                      )}
                     </div>
 
                     <div className="text-right shrink-0 space-y-1">
@@ -340,6 +395,17 @@ export function Orders() {
                     </button>
                   ))}
                 </div>
+
+                {selectedOrder.customer_phone && (
+                  <button
+                    type="button"
+                    onClick={() => sendWhatsAppStatusUpdate(selectedOrder)}
+                    className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-[0.98] mt-2"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Send Status Update to Customer</span>
+                  </button>
+                )}
               </div>
 
               {/* Customer & Location */}

@@ -37,7 +37,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const signOut = async () => {
-        await authClient.signOut();
+        try {
+            await authClient.signOut();
+        } catch (err) {
+            console.error('[Auth] signOut error:', err);
+        }
+
+        // Thoroughly clear any session tokens from client cookies
+        const cookieNames = [
+            'neon-auth.session_token',
+            '__Secure-neon-auth.session_token',
+            'better-auth.session_token',
+            '__Secure-better-auth.session_token',
+            'neon-auth.session_data',
+            'better-auth.session_data',
+        ];
+        cookieNames.forEach((name) => {
+            document.cookie = `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;`;
+            document.cookie = `${name}=; Path=/api/auth; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;`;
+            document.cookie = `${name}=; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;`;
+        });
+
+        // Clear local storage and session storage
+        try {
+            sessionStorage.clear();
+            localStorage.clear();
+        } catch {}
     };
 
     return (

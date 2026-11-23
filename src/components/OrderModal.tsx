@@ -71,8 +71,8 @@ export function OrderModal({ items, business, isOpen, onClose, onSuccess }: Orde
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name.trim() || !formData.location.trim()) {
-      alert('Please fill in your name and delivery location');
+    if (!formData.name.trim() || !formData.location.trim() || !formData.phone.trim()) {
+      alert('Please fill in your name, delivery location, and WhatsApp phone number');
       return;
     }
 
@@ -114,8 +114,9 @@ export function OrderModal({ items, business, isOpen, onClose, onSuccess }: Orde
 
     const storeName = business?.business_name || 'Store';
     const sourceBadge = source && source !== 'direct' ? `\n\n📱 _Ordered via ${source.charAt(0).toUpperCase() + source.slice(1)}_` : '';
+    const trackUrl = `${window.location.origin}/track?order=${orderNumber}`;
 
-    const message = `🛍️ *NEW ORDER: ${orderNumber}*\nStore: *${storeName}*\n${itemsList}\n\n💰 *Total: GHS ${money(totalPrice)}*\n\n👤 *Customer:* ${formData.name.trim()}\n📍 *Location:* ${formData.location.trim()}${formData.phone ? `\n📞 *Phone:* ${formData.phone.trim()}` : ''}${formData.note ? `\n📝 *Notes:* ${formData.note.trim()}` : ''}${sourceBadge}\n\nThank you!`;
+    const message = `🛍️ *NEW ORDER: ${orderNumber}*\nStore: *${storeName}*\n${itemsList}\n\n💰 *Total: GHS ${money(totalPrice)}*\n\n👤 *Customer:* ${formData.name.trim()}\n📍 *Location:* ${formData.location.trim()}\n📞 *Phone:* ${formData.phone.trim()}${formData.note ? `\n📝 *Notes:* ${formData.note.trim()}` : ''}\n\n🔍 *Track Order:* ${trackUrl}${sourceBadge}\n\nThank you!`;
 
     const encodedMessage = encodeURIComponent(message);
     const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`;
@@ -200,10 +201,17 @@ export function OrderModal({ items, business, isOpen, onClose, onSuccess }: Orde
                 <ExternalLink className="w-4 h-4 opacity-80" />
               </a>
 
+              <a
+                href={`/track?order=${confirmedOrder.orderNumber}`}
+                className="w-full inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 px-4 rounded-2xl shadow-xs transition-colors text-sm cursor-pointer"
+              >
+                Track Order Live
+              </a>
+
               <button
                 type="button"
                 onClick={handleFinish}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition-colors text-sm cursor-pointer"
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-2xl transition-colors text-xs cursor-pointer"
               >
                 Back to Store
               </button>
@@ -282,15 +290,16 @@ export function OrderModal({ items, business, isOpen, onClose, onSuccess }: Orde
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Phone Number <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                  Phone Number (WhatsApp) *
                 </label>
                 <input
                   type="tel"
                   name="phone"
                   value={formData.phone}
                   onChange={handleInputChange}
-                  placeholder="Optional (WhatsApp provides your number)"
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none text-sm transition-all"
+                  placeholder="e.g. 024 123 4567"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none text-sm transition-all font-semibold"
+                  required
                 />
               </div>
 

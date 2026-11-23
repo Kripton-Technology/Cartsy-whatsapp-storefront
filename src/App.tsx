@@ -18,6 +18,7 @@ import { Onboarding } from './pages/admin/Onboarding';
 import { Login } from './pages/admin/Login';
 import { AuthCallback } from './pages/AuthCallback';
 import { AuthSuccess } from './pages/AuthSuccess';
+import { OrderTracking } from './pages/OrderTracking';
 import { Shield } from 'lucide-react';
 import { useEffect } from 'react';
 
@@ -60,6 +61,10 @@ function App() {
               <Route path="/s/:slug/p/:productId" element={<Store />} />
               <Route path="/store/:slug" element={<Store />} />
               <Route path="/store/:slug/p/:productId" element={<Store />} />
+
+              {/* Buyer Order Tracking */}
+              <Route path="/track" element={<OrderTracking />} />
+              <Route path="/track/:orderNumber" element={<OrderTracking />} />
 
               {/* OAuth Callback Handlers */}
               <Route path="/auth/callback" element={<AuthCallback />} />

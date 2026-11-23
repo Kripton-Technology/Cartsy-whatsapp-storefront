@@ -20,24 +20,17 @@ function base64UrlDecode(str: string): Buffer {
   return Buffer.from(base64, 'base64');
 }
 
+// Default production-stable VAPID keys (can be overridden by process.env)
+const DEFAULT_VAPID_PUBLIC_KEY = 'BCNSagRK4WYmOP-XirgQbh9fYeJ1oWbg36b3r6PoHT6BcwPXQ4-Zb9dqgk7vfZbHxOyRCgK5DOzK_CwIcKdmyLA';
+const DEFAULT_VAPID_PRIVATE_KEY = '7mffNDZYRCStZPGG8rRWT0kSAbgUSik8lgP2YiaDyvA';
+
 // Initialize or generate VAPID keys
 export function getVapidKeys() {
   if (vapidKeys) return vapidKeys;
 
-  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    vapidKeys = {
-      publicKey: process.env.VAPID_PUBLIC_KEY,
-      privateKey: process.env.VAPID_PRIVATE_KEY,
-    };
-    return vapidKeys;
-  }
-
-  // Generate ephemeral/fallback P-256 ECDH keys
-  const ecdh = crypto.createECDH('prime256v1');
-  ecdh.generateKeys();
   vapidKeys = {
-    publicKey: base64UrlEncode(ecdh.getPublicKey()),
-    privateKey: base64UrlEncode(ecdh.getPrivateKey()),
+    publicKey: process.env.VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC_KEY,
+    privateKey: process.env.VAPID_PRIVATE_KEY || DEFAULT_VAPID_PRIVATE_KEY,
   };
   return vapidKeys;
 }
