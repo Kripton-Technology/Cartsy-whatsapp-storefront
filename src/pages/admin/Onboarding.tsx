@@ -1,16 +1,16 @@
 import { useState } from 'react';
-import { 
-  Store, 
-  Rocket, 
-  ArrowRight, 
-  MessageSquare, 
-  Globe, 
-  Upload, 
-  Image as ImageIcon, 
-  MapPin, 
-  Facebook, 
-  Instagram, 
-  ArrowLeft, 
+import {
+  Store,
+  Rocket,
+  ArrowRight,
+  MessageSquare,
+  Globe,
+  Upload,
+  Image as ImageIcon,
+  MapPin,
+  Facebook,
+  Instagram,
+  ArrowLeft,
   Tag,
   GraduationCap,
   Check
@@ -71,9 +71,9 @@ export function Onboarding() {
   // Ghana local phone validation: starts with 0 and exactly 10 digits
   const isWhatsappValid = /^[0][0-9]{9}$/.test(formData.whatsappNumber.trim());
 
-  const isStep1Valid = formData.businessName.trim().length > 0 && 
-                       formData.slug.trim().length > 0 && 
-                       isWhatsappValid;
+  const isStep1Valid = formData.businessName.trim().length > 0 &&
+    formData.slug.trim().length > 0 &&
+    isWhatsappValid;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,8 +96,15 @@ export function Onboarding() {
         instagram_url: formData.instagramUrl || null,
         logo_url: formData.logoUrl || null,
         hero_banner_url: formData.heroBannerUrl || null,
-        access_code: formData.accessCode.trim() || undefined,
-      } as any);
+      });
+
+      if (formData.accessCode.trim()) {
+        try {
+          await adminApi.claimAccessCode(formData.accessCode.trim());
+        } catch (claimErr: any) {
+          console.warn('[Onboarding] Could not claim access code:', claimErr.message);
+        }
+      }
 
       // Onboarding complete — redirect straight to the store dashboard
       // Refresh page to let StoreProvider load the newly created store
@@ -111,7 +118,7 @@ export function Onboarding() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-4">
       <div className="w-full max-w-xl bg-white rounded-2xl shadow-sm p-6 md:p-10 border border-slate-200/80">
-        
+
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
@@ -145,7 +152,7 @@ export function Onboarding() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          
+
           {/* STEP 1: BASICS */}
           {step === 1 && (
             <div className="space-y-5">
@@ -200,11 +207,10 @@ export function Onboarding() {
                     required
                     value={formData.whatsappNumber}
                     onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
-                    className={`w-full pl-12 pr-4 py-3 bg-slate-50 border rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-slate-900 outline-none transition-all text-sm ${
-                      formData.whatsappNumber.length > 0 && !isWhatsappValid 
-                        ? 'border-rose-400' 
-                        : 'border-slate-200'
-                    }`}
+                    className={`w-full pl-12 pr-4 py-3 bg-slate-50 border rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-slate-900 outline-none transition-all text-sm ${formData.whatsappNumber.length > 0 && !isWhatsappValid
+                      ? 'border-rose-400'
+                      : 'border-slate-200'
+                      }`}
                     placeholder="e.g. 0244369749"
                   />
                   {formData.whatsappNumber.length > 0 && !isWhatsappValid && (
@@ -254,7 +260,7 @@ export function Onboarding() {
           {/* STEP 2: BRANDING & SOCIALS */}
           {step === 2 && (
             <div className="space-y-5">
-              
+
               {/* Slogan & Location Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -350,7 +356,7 @@ export function Onboarding() {
               {/* Social Media Links */}
               <div className="space-y-3">
                 <span className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Social Links (Optional)</span>
-                
+
                 <div className="relative">
                   <Facebook className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#1877F2]" />
                   <input

@@ -2569,13 +2569,122 @@ app.get('/api/superadmin/cohorts/:id/access-codes', requireSuperAdmin, async (re
   try {
     const { id } = req.params;
     const rows = await query<any>(
-      `SELECT gac.*, s.business_name AS store_name, s.slug AS store_slug
+      `SELECT gac.*, 
+              s.business_name AS store_name, s.slug AS store_slug,
+              s.whatsapp_number AS store_whatsapp,
+              s.is_sponsored AS store_is_sponsored,
+              s.subscription_status AS store_subscription_status,
+              s.sponsored_expires_at AS store_sponsored_expires_at,
+              COALESCE(u.email, u2.email) AS owner_email,
+              COALESCE(u.name, u2.name) AS owner_name
        FROM graduate_access_codes gac
        LEFT JOIN stores s ON s.id = gac.store_id
+       LEFT JOIN neon_auth.user u ON u.id = s.owner_id
+       LEFT JOIN neon_auth.user u2 ON u2.id = (
+         SELECT user_id FROM store_admins WHERE store_id = s.id ORDER BY created_at LIMIT 1
+       )
        WHERE gac.cohort_id = $1
        ORDER BY gac.created_at DESC`,
       [id]
     );
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/superadmin/graduates — comprehensive graduation list with aligned stores, institutions, and users
+app.get('/api/superadmin/graduates', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { institution_id, cohort_id, status, search } = req.query as {
+      institution_id?: string;
+      cohort_id?: string;
+      status?: string;
+      search?: string;
+    };
+
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    if (institution_id) {
+      params.push(institution_id);
+      conditions.push(`i.id = $${params.length}`);
+    }
+
+    if (cohort_id) {
+      params.push(cohort_id);
+      conditions.push(`c.id = $${params.length}`);
+    }
+
+    if (status) {
+      params.push(status);
+      conditions.push(`gac.status = $${params.length}`);
+    }
+
+    if (search && search.trim()) {
+      params.push(`%${search.trim()}%`);
+      const pIdx = `$${params.length}`;
+      conditions.push(`(
+        gac.code ILIKE ${pIdx} OR 
+        gac.graduate_name ILIKE ${pIdx} OR 
+        gac.graduate_email ILIKE ${pIdx} OR 
+        gac.graduate_phone ILIKE ${pIdx} OR 
+        s.business_name ILIKE ${pIdx} OR 
+        s.slug ILIKE ${pIdx} OR 
+        COALESCE(u.email, u2.email) ILIKE ${pIdx} OR
+        i.name ILIKE ${pIdx}
+      )`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rows = await query<any>(
+      `SELECT 
+        gac.id,
+        gac.cohort_id,
+        gac.code,
+        gac.graduate_name,
+        gac.graduate_phone,
+        gac.graduate_email,
+        gac.course,
+        gac.status,
+        gac.store_id,
+        gac.claimed_at,
+        gac.expires_at,
+        gac.created_at,
+        -- Institution info
+        i.id AS institution_id,
+        i.name AS institution_name,
+        i.slug AS institution_slug,
+        i.logo_url AS institution_logo,
+        -- Cohort info
+        c.name AS cohort_name,
+        c.year AS cohort_year,
+        -- Aligned Store info
+        s.business_name AS store_name,
+        s.slug AS store_slug,
+        s.whatsapp_number AS store_whatsapp,
+        s.is_sponsored AS store_is_sponsored,
+        s.subscription_status AS store_subscription_status,
+        s.sponsored_expires_at AS store_sponsored_expires_at,
+        s.created_at AS store_created_at,
+        -- Aligned User / Owner info
+        COALESCE(u.id, u2.id) AS owner_id,
+        COALESCE(u.email, u2.email) AS owner_email,
+        COALESCE(u.name, u2.name) AS owner_name
+       FROM graduate_access_codes gac
+       JOIN cohorts c ON c.id = gac.cohort_id
+       JOIN institutions i ON i.id = c.institution_id
+       LEFT JOIN stores s ON s.id = gac.store_id
+       LEFT JOIN neon_auth.user u ON u.id = s.owner_id
+       LEFT JOIN neon_auth.user u2 ON u2.id = (
+         SELECT user_id FROM store_admins WHERE store_id = s.id ORDER BY created_at LIMIT 1
+       )
+       ${whereClause}
+       ORDER BY gac.claimed_at DESC NULLS LAST, gac.created_at DESC`,
+      params
+    );
+
     res.json(rows);
   } catch (error) {
     next(error);
