@@ -959,7 +959,8 @@ app.post('/api/admin/stores', async (req: AuthedRequest, res, next) => {
       facebook_url,
       instagram_url,
       logo_url,
-      hero_banner_url
+      hero_banner_url,
+      access_code
     } = req.body;
 
     let formattedWhatsapp = whatsapp_number ? String(whatsapp_number).replace(/[^0-9]/g, '') : '';
@@ -967,29 +968,123 @@ app.post('/api/admin/stores', async (req: AuthedRequest, res, next) => {
       formattedWhatsapp = '233' + formattedWhatsapp.slice(1);
     }
 
+    // Check if an institution/graduation access code was provided
+    let accessCodeRecord: any = null;
+    let sponsoredUntil: Date | null = null;
+    if (access_code && String(access_code).trim()) {
+      const codeRows = await query<any>(
+        `SELECT gac.*, c.institution_id, i.name AS institution_name, i.revenue_split_pct,
+                i.logo_url AS institution_logo
+         FROM graduate_access_codes gac
+         JOIN cohorts c ON gac.cohort_id = c.id
+         JOIN institutions i ON c.institution_id = i.id
+         WHERE UPPER(TRIM(gac.code)) = UPPER(TRIM($1))`,
+        [String(access_code).trim()]
+      );
+
+      if (codeRows.length === 0) {
+        res.status(400).json({ error: 'Invalid graduation / institution access code. Please check and try again.' });
+        return;
+      }
+      const ac = codeRows[0];
+      if (ac.status === 'revoked') {
+        res.status(400).json({ error: 'This access code has been revoked by the institution administrator.' });
+        return;
+      }
+      if (ac.store_id || ac.status === 'redeemed') {
+        res.status(400).json({ error: 'This access code has already been claimed by another store.' });
+        return;
+      }
+      if (new Date(ac.expires_at) < new Date() || ac.status === 'expired') {
+        res.status(400).json({ error: 'This access code has expired.' });
+        return;
+      }
+
+      accessCodeRecord = ac;
+      const now = new Date();
+      sponsoredUntil = new Date(now);
+      sponsoredUntil.setMonth(sponsoredUntil.getMonth() + 6);
+    }
+
     // 1. Create the store
-    const storeRows = await query<any>(
-      `INSERT INTO stores (
-         owner_id, slug, business_name, whatsapp_number,
-         tagline, location, facebook_url, instagram_url,
-         logo_url, hero_banner_url
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [
-        req.userId, 
-        slug, 
-        business_name, 
-        formattedWhatsapp,
-        tagline || null,
-        location || null,
-        facebook_url || null,
-        instagram_url || null,
-        logo_url || null,
-        hero_banner_url || null
-      ]
-    );
+    let storeRows: any[];
+    if (accessCodeRecord && sponsoredUntil) {
+      // Store created under institution graduation package — trial bypassed, immediately active & sponsored
+      storeRows = await query<any>(
+        `INSERT INTO stores (
+           owner_id, slug, business_name, whatsapp_number,
+           tagline, location, facebook_url, instagram_url,
+           logo_url, hero_banner_url,
+           is_sponsored, institution_id, cohort_id, sponsored_expires_at,
+           subscription_status, trial_ends_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, $12, $13, 'active', NULL)
+         RETURNING *`,
+        [
+          req.userId, 
+          slug, 
+          business_name, 
+          formattedWhatsapp,
+          tagline || null,
+          location || null,
+          facebook_url || null,
+          instagram_url || null,
+          logo_url || null,
+          hero_banner_url || null,
+          accessCodeRecord.institution_id,
+          accessCodeRecord.cohort_id,
+          sponsoredUntil.toISOString()
+        ]
+      );
+    } else {
+      storeRows = await query<any>(
+        `INSERT INTO stores (
+           owner_id, slug, business_name, whatsapp_number,
+           tagline, location, facebook_url, instagram_url,
+           logo_url, hero_banner_url
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [
+          req.userId, 
+          slug, 
+          business_name, 
+          formattedWhatsapp,
+          tagline || null,
+          location || null,
+          facebook_url || null,
+          instagram_url || null,
+          logo_url || null,
+          hero_banner_url || null
+        ]
+      );
+    }
     const store = storeRows[0];
+
+    // If an access code was used, redeem it and create ledger record
+    if (accessCodeRecord && sponsoredUntil) {
+      await query(
+        `UPDATE graduate_access_codes
+         SET store_id = $1, claimed_at = now(), status = 'redeemed'
+         WHERE id = $2`,
+        [store.id, accessCodeRecord.id]
+      );
+
+      const grossAmount = 1000.00;
+      const splitPct = Number(accessCodeRecord.revenue_split_pct || 55.00);
+      const schoolAmount = (grossAmount * splitPct) / 100;
+      const cartsyAmount = grossAmount - schoolAmount;
+      const now = new Date();
+      const periodStart = now.toISOString().slice(0, 10);
+      const periodEnd = sponsoredUntil.toISOString().slice(0, 10);
+
+      await query(
+        `INSERT INTO institution_ledgers
+          (store_id, institution_id, access_code_id, amount_total, amount_cartsy, amount_institution, status, period_start, period_end)
+         VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', $7, $8)`,
+        [store.id, accessCodeRecord.institution_id, accessCodeRecord.id, grossAmount, cartsyAmount, schoolAmount, periodStart, periodEnd]
+      );
+    }
 
     // 2. Make the user an owner of this store
     await query(
@@ -1072,6 +1167,53 @@ app.get('/api/admin/billing/status', async (req: AuthedRequest, res, next) => {
   }
 });
 
+// Helper: get active Paystack config from DB (falls back to env vars)
+async function getPaystackConfig(): Promise<{
+  secret_key: string;
+  public_key: string;
+  plan_code: string;
+  payment_url: string;
+  mode: string;
+}> {
+  const rows = await query<{ key: string; value: string }>(
+    `SELECT key, value FROM superadmin_settings WHERE key IN (
+      'paystack_mode',
+      'paystack_live_secret_key','paystack_live_public_key','paystack_live_plan_code','paystack_live_payment_url',
+      'paystack_test_secret_key','paystack_test_public_key','paystack_test_plan_code','paystack_test_payment_url'
+    )`
+  );
+  const cfg: Record<string, string> = {};
+  for (const r of rows) cfg[r.key] = r.value;
+
+  const mode = cfg['paystack_mode'] || 'test';
+  const prefix = mode === 'live' ? 'paystack_live_' : 'paystack_test_';
+
+  return {
+    mode,
+    secret_key: cfg[`${prefix}secret_key`] || (mode === 'live' ? '' : (env.paystackSecretKey || '')),
+    public_key: cfg[`${prefix}public_key`] || (mode === 'live' ? '' : (process.env.VITE_PAYSTACK_PUBLIC_KEY || '')),
+    plan_code:  cfg[`${prefix}plan_code`]  || (mode === 'live' ? '' : (env.paystackPlanCode || '')),
+    payment_url: cfg[`${prefix}payment_url`] || (mode === 'live' ? '' : (env.paystackPaymentUrl || '')),
+  };
+}
+
+// GET /api/admin/billing/payment-config — returns active Paystack public config for the client
+app.get('/api/admin/billing/payment-config', async (req: AuthedRequest, res, next) => {
+  try {
+    const store = await requireAdminStore(req, res, true);
+    if (!store) return;
+    const cfg = await getPaystackConfig();
+    res.json({
+      mode: cfg.mode,
+      public_key: cfg.public_key,
+      plan_code: cfg.plan_code,
+      payment_url: cfg.payment_url,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/admin/billing/subscribe', async (req: AuthedRequest, res, next) => {
   try {
     const store = await requireAdminStore(req, res, true);
@@ -1087,13 +1229,16 @@ app.post('/api/admin/billing/subscribe', async (req: AuthedRequest, res, next) =
       [req.userId]
     );
     const email = userRows[0]?.email;
-    const baseUrl = env.paystackPaymentUrl;
+
+    // Load active Paystack config from DB (admin-controlled)
+    const payCfg = await getPaystackConfig();
+    const baseUrl = payCfg.payment_url;
     
-    console.log(`[Billing Subscribe] Store ${store.id} requesting subscription link. Base URL: ${baseUrl}, User Email: ${email}`);
+    console.log(`[Billing Subscribe] Store ${store.id} requesting subscription link. Mode: ${payCfg.mode}, Base URL: ${baseUrl}, User Email: ${email}`);
 
     if (!baseUrl) {
-      console.error('[Billing Subscribe] env.paystackPaymentUrl is not configured');
-      res.status(500).json({ error: 'Paystack payment page URL is not configured on the server.' });
+      console.error('[Billing Subscribe] Paystack payment_url not configured in superadmin_settings');
+      res.status(500).json({ error: 'Paystack payment page URL is not configured. Please ask the platform admin to set it in Settings.' });
       return;
     }
 
@@ -1138,7 +1283,7 @@ app.post('/api/admin/billing/verify', async (req: AuthedRequest, res, next) => {
     }
 
     // Call Paystack API to verify reference
-    const paystackSecret = env.paystackSecretKey;
+    const paystackSecret = (await getPaystackConfig()).secret_key || env.paystackSecretKey;
     if (!paystackSecret || paystackSecret === 'sk_test_placeholder_value') {
       console.error('[Billing Verify] Paystack secret key is missing or set to placeholder value.');
       res.status(500).json({ error: 'Paystack is not configured correctly on the server.' });
@@ -1672,10 +1817,18 @@ query(`
     updated_at timestamptz DEFAULT now()
   )
 `).then(() => {
-  // Seed default paystack mode if not set
+  // Seed default paystack mode and config keys if not set
   return query(`
-    INSERT INTO superadmin_settings (key, value)
-    VALUES ('paystack_mode', 'test')
+    INSERT INTO superadmin_settings (key, value) VALUES
+      ('paystack_mode', 'test'),
+      ('paystack_live_secret_key', ''),
+      ('paystack_live_public_key', ''),
+      ('paystack_live_plan_code', ''),
+      ('paystack_live_payment_url', ''),
+      ('paystack_test_secret_key', ''),
+      ('paystack_test_public_key', ''),
+      ('paystack_test_plan_code', ''),
+      ('paystack_test_payment_url', '')
     ON CONFLICT (key) DO NOTHING
   `);
 }).then(() => console.log('[SuperAdmin] Settings table ready'))
@@ -2135,8 +2288,16 @@ app.post('/api/admin/claim-access-code', async (req: AuthedRequest, res: express
       return;
     }
 
-    // Fetch the store for this seller
-    const storeRows = await query<any>('SELECT id, is_sponsored FROM stores WHERE owner_id = $1 LIMIT 1', [userId]);
+    // Fetch the store for this seller (either owned directly or via store_admins)
+    const storeRows = await query<any>(
+      `SELECT s.id, s.is_sponsored 
+       FROM stores s
+       LEFT JOIN store_admins sa ON sa.store_id = s.id
+       WHERE s.owner_id = $1 OR sa.user_id = $1
+       ORDER BY s.created_at DESC
+       LIMIT 1`,
+      [userId]
+    );
     if (storeRows.length === 0) {
       res.status(404).json({ error: 'No store found for this account.' });
       return;
@@ -2150,8 +2311,8 @@ app.post('/api/admin/claim-access-code', async (req: AuthedRequest, res: express
        FROM graduate_access_codes gac
        JOIN cohorts c ON gac.cohort_id = c.id
        JOIN institutions i ON c.institution_id = i.id
-       WHERE gac.code = $1`,
-      [code.trim().toUpperCase()]
+       WHERE UPPER(TRIM(gac.code)) = UPPER(TRIM($1))`,
+      [code.trim()]
     );
 
     if (codeRows.length === 0) {
@@ -2193,6 +2354,7 @@ app.post('/api/admin/claim-access-code', async (req: AuthedRequest, res: express
        SET institution_id = $1, cohort_id = $2,
            is_sponsored = true, sponsored_expires_at = $3,
            subscription_status = 'active',
+           trial_ends_at = NULL,
            updated_at = now()
        WHERE id = $4`,
       [ac.institution_id, ac.cohort_id, sponsoredUntil.toISOString(), store.id]

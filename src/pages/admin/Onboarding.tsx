@@ -96,16 +96,9 @@ export function Onboarding() {
         instagram_url: formData.instagramUrl || null,
         logo_url: formData.logoUrl || null,
         hero_banner_url: formData.heroBannerUrl || null,
-      });
+        access_code: formData.accessCode.trim() || undefined,
+      } as any);
 
-      if (formData.accessCode.trim()) {
-        try {
-          await adminApi.claimAccessCode(formData.accessCode.trim());
-        } catch (claimErr: any) {
-          console.warn('[Onboarding] Could not claim access code:', claimErr.message);
-        }
-      }
-      
       // Onboarding complete — redirect straight to the store dashboard
       // Refresh page to let StoreProvider load the newly created store
       window.location.href = '/admin';
