@@ -1,5 +1,5 @@
 import { ShoppingCart, Plus, Check } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { Product } from '../lib/types';
 import { money } from '../lib/format';
 
@@ -13,6 +13,17 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
   const [quantity, setQuantity] = useState(1);
   const [showQuantitySelector, setShowQuantitySelector] = useState(false);
   const [added, setAdded] = useState(false);
+
+  // VibeUI Spotlight Cursor Effect
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [isHovered, setIsHovered] = useState(false);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
 
   const handleAddClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // prevent card click
@@ -31,11 +42,26 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
 
   return (
     <div
+      ref={cardRef}
       onClick={onClick}
-      className={`bg-brand-steel/10 backdrop-blur-xl rounded-2xl shadow-xl hover:shadow-2xl hover:border-brand-cream/40 transition-all duration-300 overflow-hidden flex flex-col h-full border border-brand-steel/20 group ${onClick ? 'cursor-pointer hover:-translate-y-1' : ''}`}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={`relative bg-white rounded-2xl shadow-xs hover:shadow-md hover:border-slate-300 transition-all duration-200 overflow-hidden flex flex-col h-full border border-slate-200/80 group ${
+        onClick ? 'cursor-pointer hover:-translate-y-0.5' : ''
+      }`}
     >
+      {/* VibeUI Spotlight Radial Glow */}
+      <div
+        className="pointer-events-none absolute -inset-px transition-opacity duration-300 rounded-2xl z-0"
+        style={{
+          opacity: isHovered ? 1 : 0,
+          background: `radial-gradient(350px circle at ${mousePos.x}px ${mousePos.y}px, rgba(0, 0, 0, 0.03), transparent 45%)`,
+        }}
+      />
+
       {/* Product Thumbnail */}
-      <div className="relative h-48 sm:h-52 w-full bg-brand-steel/20 overflow-hidden border-b border-brand-steel/15">
+      <div className="relative h-48 sm:h-52 w-full bg-slate-50 overflow-hidden border-b border-slate-100 z-10">
         {product.image_url ? (
           <img
             src={product.image_url}
@@ -43,14 +69,14 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brand-steel/20 to-brand-dark/40">
-            <ShoppingCart size={44} className="text-brand-slate/40" />
+          <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">
+            <ShoppingCart size={40} className="opacity-40" />
           </div>
         )}
 
         {!product.in_stock && (
-          <div className="absolute inset-0 bg-brand-dark/85 backdrop-blur-sm flex items-center justify-center">
-            <span className="text-rose-400 font-black text-sm uppercase tracking-widest border border-rose-500/30 bg-rose-500/10 px-3 py-1 rounded-xl">
+          <div className="absolute inset-0 bg-white/90 backdrop-blur-xs flex items-center justify-center z-20">
+            <span className="text-rose-600 font-bold text-xs uppercase tracking-wider border border-rose-200 bg-rose-50 px-3 py-1 rounded-xl shadow-xs">
               Out of Stock
             </span>
           </div>
@@ -58,14 +84,14 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
       </div>
 
       {/* Card Content */}
-      <div className="p-4 sm:p-5 flex flex-col flex-1 justify-between">
+      <div className="p-4 sm:p-5 flex flex-col flex-1 justify-between z-10 bg-white">
         <div>
-          <h3 className="text-base font-extrabold text-brand-header mb-1.5 line-clamp-2 group-hover:text-brand-cream transition-colors font-display">
+          <h3 className="text-base font-bold text-slate-900 mb-1.5 line-clamp-2 group-hover:text-emerald-700 transition-colors font-display">
             {product.name}
           </h3>
 
           {product.description && (
-            <p className="text-xs font-semibold text-brand-slate mb-3 line-clamp-2 leading-relaxed">
+            <p className="text-xs font-normal text-slate-500 mb-3 line-clamp-2 leading-relaxed">
               {product.description}
             </p>
           )}
@@ -74,19 +100,19 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
         <div className="pt-2">
           {/* Price Tag */}
           <div className="flex items-baseline gap-1 mb-3">
-            <span className="text-lg sm:text-xl font-black text-brand-cream font-display">
+            <span className="text-lg sm:text-xl font-black text-slate-900 font-display">
               GHS {money(product.price)}
             </span>
           </div>
 
           {/* Quantity Selector Overlay */}
           {showQuantitySelector && (
-            <div className="mb-3 p-3 bg-brand-steel/15 backdrop-blur-md border border-brand-steel/20 rounded-xl">
-              <p className="text-[11px] font-bold text-brand-slate uppercase mb-1.5">Select Quantity:</p>
+            <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+              <p className="text-[11px] font-bold text-slate-600 uppercase mb-1.5">Select Quantity:</p>
               <div className="flex items-center gap-2">
                 <button
                   onClick={(e) => { e.stopPropagation(); setQuantity(Math.max(1, quantity - 1)); }}
-                  className="w-8 h-8 rounded-lg bg-brand-steel/20 hover:bg-brand-steel/35 text-brand-header font-bold transition-all flex items-center justify-center"
+                  className="w-8 h-8 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 font-bold transition-all flex items-center justify-center"
                 >
                   −
                 </button>
@@ -95,12 +121,12 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
                   value={quantity}
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-12 text-center text-sm font-bold bg-brand-steel/20 border border-brand-steel/30 text-brand-header rounded-lg outline-none py-1"
+                  className="w-12 text-center text-sm font-bold bg-white border border-slate-200 text-slate-900 rounded-lg outline-none py-1"
                   min="1"
                 />
                 <button
                   onClick={(e) => { e.stopPropagation(); setQuantity(quantity + 1); }}
-                  className="w-8 h-8 rounded-lg bg-brand-steel/20 hover:bg-brand-steel/35 text-brand-header font-bold transition-all flex items-center justify-center"
+                  className="w-8 h-8 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 font-bold transition-all flex items-center justify-center"
                 >
                   +
                 </button>
@@ -112,10 +138,10 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
           <button
             onClick={handleAddClick}
             disabled={!product.in_stock}
-            className={`w-full font-extrabold text-xs sm:text-sm py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-md active:scale-95 ${
+            className={`w-full font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs active:scale-95 cursor-pointer ${
               added
-                ? 'bg-emerald-500 text-white'
-                : 'bg-brand-cream text-brand-dark hover:opacity-90 disabled:bg-brand-steel/30 disabled:text-brand-slate disabled:cursor-not-allowed'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-slate-900 hover:bg-slate-800 text-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed'
             }`}
           >
             {added ? (
@@ -139,7 +165,7 @@ export function ProductCard({ product, onAddToCart, onClick }: ProductCardProps)
           {showQuantitySelector && (
             <button
               onClick={(e) => { e.stopPropagation(); setShowQuantitySelector(false); }}
-              className="w-full mt-2 bg-brand-steel/20 hover:bg-brand-steel/30 text-brand-slate font-bold py-1.5 rounded-lg transition-colors text-xs"
+              className="w-full mt-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold py-1.5 rounded-lg transition-colors text-xs"
             >
               Cancel
             </button>

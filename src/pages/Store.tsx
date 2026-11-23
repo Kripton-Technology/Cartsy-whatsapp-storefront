@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { Navbar } from '../components/Navbar';
 import { Hero } from '../components/Hero';
 import { ProductGrid } from '../components/ProductGrid';
@@ -10,10 +10,13 @@ import { useBusinessInfo } from '../hooks/useBusinessInfo';
 import { useProducts } from '../hooks/useProducts';
 import { useCategories } from '../hooks/useCategories';
 import { useCart } from '../contexts/CartContext';
+import { publicApi } from '../lib/api';
+import { money } from '../lib/format';
 import type { Product } from '../lib/types';
 
 export function Store() {
-    const { slug } = useParams();
+    const { slug, productId } = useParams();
+    const [searchParams] = useSearchParams();
     const { business, loading: businessLoading } = useBusinessInfo(slug);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const { products, loading: productsLoading } = useProducts(selectedCategory || undefined, slug);
@@ -29,7 +32,37 @@ export function Store() {
         clearCart,
         getTotalPrice,
         getTotalItems,
+        setCurrentStoreSlug,
     } = useCart();
+
+    // Sync store slug in cart context and capture source
+    useEffect(() => {
+        if (slug) {
+            setCurrentStoreSlug(slug);
+
+            // AN-1: Store visits by source
+            const src = searchParams.get('src') || sessionStorage.getItem('cartsy_src') || 'direct';
+            sessionStorage.setItem('cartsy_src', src);
+
+            // Record visit once per session for this store
+            const visitRecordedKey = `cartsy_visit_${slug}_${src}`;
+            if (!sessionStorage.getItem(visitRecordedKey)) {
+                sessionStorage.setItem(visitRecordedKey, '1');
+                publicApi.recordVisit(slug, src);
+            }
+        }
+    }, [slug, searchParams, setCurrentStoreSlug]);
+
+    // Sync store custom accent color to CSS variables
+    useEffect(() => {
+        const themeColor = business?.delivery_settings?.theme_color || '#059669';
+        const hex = themeColor.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16) || 5;
+        const g = parseInt(hex.substring(2, 4), 16) || 150;
+        const b = parseInt(hex.substring(4, 6), 16) || 105;
+        document.documentElement.style.setProperty('--store-accent', themeColor);
+        document.documentElement.style.setProperty('--store-accent-rgb', `${r} ${g} ${b}`);
+    }, [business?.delivery_settings?.theme_color]);
 
     const handleAddToCart = (product: Product, quantity: number) => {
         addToCart(product, quantity);
@@ -42,7 +75,6 @@ export function Store() {
 
     const handleCheckoutSuccess = () => {
         clearCart();
-        setIsCheckoutOpen(false);
     };
 
     if (businessLoading) {
@@ -65,10 +97,13 @@ export function Store() {
     }
 
     const isOnHold = business.on_hold === true;
+    const isSponsoredActive = (business as any).is_sponsored && (business as any).sponsored_expires_at
+        ? new Date((business as any).sponsored_expires_at) > new Date()
+        : false;
     const isTrialActive = business.trial_ends_at ? new Date(business.trial_ends_at) > new Date() : false;
     const isPaidActive = business.subscription_status === 'active';
-    const isPaymentDueOrCanceled = ['past_due', 'unpaid', 'canceled'].includes(business.subscription_status || '');
-    const isStoreLive = !isOnHold && !isPaymentDueOrCanceled && (isPaidActive || isTrialActive);
+    const isPaymentDueOrCanceled = ['past_due', 'unpaid', 'canceled'].includes(business.subscription_status || '') && !isSponsoredActive;
+    const isStoreLive = !isOnHold && !isPaymentDueOrCanceled && (isPaidActive || isTrialActive || isSponsoredActive);
 
     if (!isStoreLive) {
         return (
@@ -100,7 +135,7 @@ export function Store() {
     const isLoading = productsLoading || categoriesLoading;
 
     return (
-        <div className="min-h-screen bg-brand-dark text-brand-gray flex flex-col">
+        <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col pb-28">
             <Navbar
                 business={business}
                 cartItemsCount={getTotalItems()}
@@ -114,6 +149,7 @@ export function Store() {
                 onAddToCart={handleAddToCart}
                 selectedCategory={selectedCategory}
                 onSelectCategory={setSelectedCategory}
+                initialProductId={productId}
             />
             <CartDrawer
                 isOpen={isCartOpen}
@@ -131,6 +167,32 @@ export function Store() {
                 onClose={() => setIsCheckoutOpen(false)}
                 onSuccess={handleCheckoutSuccess}
             />
+
+            {/* VibeUI Floating Quick Cart Pill Bar */}
+            {getTotalItems() > 0 && !isCartOpen && !isCheckoutOpen && (
+                <aside
+                    aria-label="Quick Cart"
+                    className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3.5 px-5 py-3 rounded-full bg-slate-900/95 text-white backdrop-blur-xl border border-slate-700 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300"
+                >
+                    <div className="flex items-center gap-2">
+                        <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                            {getTotalItems()} {getTotalItems() === 1 ? 'item' : 'items'}
+                        </span>
+                    </div>
+                    <div className="h-4 w-px bg-slate-700" />
+                    <span className="text-sm font-black text-white font-display">
+                        GHS {money(getTotalPrice())}
+                    </span>
+                    <button
+                        onClick={() => setIsCartOpen(true)}
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black transition-transform active:scale-95 shadow-xs cursor-pointer"
+                    >
+                        <span>Checkout</span>
+                    </button>
+                </aside>
+            )}
+
             <Footer business={business} />
         </div>
     );

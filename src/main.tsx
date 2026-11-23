@@ -7,6 +7,14 @@ import './index.css';
 import { NeonAuthUIProvider } from '@neondatabase/auth-ui';
 import { authClient } from './lib/auth-client';
 
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.log('SW registration note:', err);
+    });
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <NeonAuthUIProvider 

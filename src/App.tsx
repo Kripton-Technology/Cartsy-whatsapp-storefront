@@ -7,6 +7,7 @@ import { Store } from './pages/Store';
 import { StoreDirectory } from './pages/StoreDirectory';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { Dashboard } from './pages/admin/Dashboard';
+import { Orders } from './pages/admin/Orders';
 import { CategoryManager } from './pages/admin/CategoryManager';
 import { ProductManager } from './pages/admin/ProductManager';
 import { BusinessSettings } from './pages/admin/BusinessSettings';
@@ -55,7 +56,10 @@ function App() {
             <Routes>
               {/* Public Store Routes */}
               <Route path="/" element={<StoreDirectory />} />
+              <Route path="/s/:slug" element={<Store />} />
+              <Route path="/s/:slug/p/:productId" element={<Store />} />
               <Route path="/store/:slug" element={<Store />} />
+              <Route path="/store/:slug/p/:productId" element={<Store />} />
 
               {/* OAuth Callback Handlers */}
               <Route path="/auth/callback" element={<AuthCallback />} />
@@ -68,6 +72,7 @@ function App() {
               {/* Protected Admin Routes */}
               <Route path="/admin" element={<AdminLayout />}>
                 <Route index element={<Dashboard />} />
+                <Route path="orders" element={<Orders />} />
                 <Route path="products" element={<ProductManager />} />
                 <Route path="categories" element={<CategoryManager />} />
                 <Route path="settings" element={<BusinessSettings />} />

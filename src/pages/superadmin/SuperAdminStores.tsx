@@ -580,7 +580,7 @@ export function SuperAdminStores() {
                     {storeProducts.map((p) => (
                       <div key={p.id} className="flex items-center justify-between text-xs px-3 py-1.5 rounded-lg bg-white/[0.02] border border-white/5">
                         <span className="text-white/80 truncate max-w-[200px]">{p.name}</span>
-                        <span className="text-violet-400 font-mono font-bold">GHS {Number(p.price).toFixed(2)}</span>
+                        <span className="text-violet-400 font-mono font-bold">GHS {Number(p.price || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                     ))}
                   </div>

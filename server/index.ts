@@ -1,3 +1,14 @@
+import net from 'node:net';
+import dns from 'node:dns';
+
+// Fix Kali / Linux IPv6 network family auto-selection timeout with AWS / Neon
+if (typeof (net as any).setDefaultAutoSelectFamily === 'function') {
+  (net as any).setDefaultAutoSelectFamily(false);
+}
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
 import express from 'express';
 import path from 'node:path';
 import cors from 'cors';
@@ -6,15 +17,13 @@ import { createUploadSignature } from './cloudinary.js';
 import { login, getSession, requireUser, rewriteRequestCookieHeader, rewriteResponseCookie, type AuthedRequest } from './auth.js';
 import { env } from './env.js';
 import { query } from './db.js';
+import { runMigrations } from './migrations.js';
+import { getVapidPublicKey, notifyStoreOfNewOrder } from './webpush.js';
 
-// Ensure required columns exist
-query('ALTER TABLE stores ADD COLUMN IF NOT EXISTS paystack_transaction_reference text')
-  .then(() => console.log('[DB Schema Check] paystack_transaction_reference column verified'))
-  .catch(err => console.error('[DB Schema Check] failed to verify/create column:', err));
-
-query('ALTER TABLE stores ADD COLUMN IF NOT EXISTS on_hold boolean DEFAULT false')
-  .then(() => console.log('[DB Schema Check] on_hold column verified'))
-  .catch(err => console.error('[DB Schema Check] failed to verify/create on_hold column:', err));
+// Run database schema migrations
+if (env.databaseUrl) {
+  runMigrations().catch(err => console.error('[DB Migrations Error]', err));
+}
 
 const app = express();
 app.set('trust proxy', true);
@@ -392,20 +401,50 @@ function buildStoreMeta(store: Record<string, any>, siteUrl: string): string {
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="${url}" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="WhatsApp Commerce" />
-    <meta property="og:title" content="${name} — WhatsApp Store" />
+    <meta property="og:site_name" content="Cartsy" />
+    <meta property="og:title" content="${name} — Social Storefront" />
     <meta property="og:description" content="${description}" />
     <meta property="og:image" content="${image}" />
     <meta property="og:url" content="${url}" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${name} — WhatsApp Store" />
+    <meta name="twitter:title" content="${name} — Social Storefront" />
     <meta name="twitter:description" content="${description}" />
     <meta name="twitter:image" content="${image}" />
     <script type="application/ld+json">${jsonLd}</script>
     <!-- End Store SEO -->`;
 }
 
-// ─── Production: Serve static frontend + SEO-injected store pages ──────────────
+function buildProductMeta(store: Record<string, any>, product: Record<string, any>, siteUrl: string): string {
+  const storeName = store.business_name || 'Cartsy Store';
+  const name = product.name || 'Product';
+  const slug = store.slug || '';
+  const price = Number(product.price || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const description = product.description || `Buy ${name} for GHS ${price} from ${storeName} on WhatsApp.`;
+  const image = (product.image_urls && product.image_urls[0]) || product.image_url || store.logo_url || `${siteUrl}/pwa-512x512.png`;
+  const url = `${siteUrl}/s/${slug}/p/${product.id}`;
+
+  return `
+    <!-- Product SEO: injected by server for ${name} -->
+    <title>${name} | GHS ${price} — ${storeName}</title>
+    <meta name="description" content="${description}" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="${url}" />
+    <meta property="og:type" content="product" />
+    <meta property="og:site_name" content="${storeName}" />
+    <meta property="og:title" content="${name} | GHS ${price}" />
+    <meta property="og:description" content="${description}" />
+    <meta property="og:image" content="${image}" />
+    <meta property="og:url" content="${url}" />
+    <meta property="product:price:amount" content="${price}" />
+    <meta property="product:price:currency" content="GHS" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${name} | GHS ${price} — ${storeName}" />
+    <meta name="twitter:description" content="${description}" />
+    <meta name="twitter:image" content="${image}" />
+    <!-- End Product SEO -->`;
+}
+
+// ─── Production: Serve static frontend + SEO-injected store/product pages ──────
 if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
   const distPath = path.resolve(process.cwd(), 'dist');
   const fs = await import('node:fs/promises');
@@ -413,32 +452,39 @@ if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
   // Serve static assets (JS, CSS, images, etc.)
   app.use(express.static(distPath));
 
-  // SEO catch-all: inject dynamic meta for /store/:slug before serving index.html
+  // SEO catch-all: inject dynamic meta for /s/:slug and /store/:slug routes
   app.use(async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (req.path.startsWith('/api')) return next();
 
-    // Only inject meta for store pages; all other SPA routes get plain index.html
-    const storeMatch = req.path.match(/^\/store\/([^/]+)\/?$/);
-    if (storeMatch) {
-      const slug = storeMatch[1];
+    // Match /s/:slug, /store/:slug, /s/:slug/p/:productId, /store/:slug/p/:productId
+    const match = req.path.match(/^\/(?:s|store)\/([^/]+)(?:\/p\/([^/]+))?\/?$/);
+    if (match) {
+      const slug = match[1];
+      const productId = match[2];
       try {
         const siteUrl = process.env.SITE_URL || process.env.VITE_SITE_URL || `https://${req.get('host')}`;
         const stores = await query<any>('SELECT * FROM stores WHERE slug = $1 AND active = true LIMIT 1', [slug]);
         if (stores.length > 0) {
           let html = await fs.readFile(path.join(distPath, 'index.html'), 'utf-8');
-          const injectedMeta = buildStoreMeta(stores[0], siteUrl);
-          // Replace the base title + meta block in index.html with store-specific tags
+          let injectedMeta = buildStoreMeta(stores[0], siteUrl);
+
+          if (productId) {
+            const products = await query<any>('SELECT * FROM products WHERE id = $1 AND store_id = $2 LIMIT 1', [productId, stores[0].id]);
+            if (products.length > 0) {
+              injectedMeta = buildProductMeta(stores[0], products[0], siteUrl);
+            }
+          }
+
           html = html.replace(
             /<!-- SEO: base\/fallback meta tags[^]*?-->/,
             injectedMeta
           );
           res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-          res.setHeader('Cache-Control', 'public, max-age=300'); // 5 min cache for store pages
+          res.setHeader('Cache-Control', 'public, max-age=300');
           return res.send(html);
         }
       } catch (err) {
-        console.error('[SEO] Failed to inject store meta:', err);
-        // Fall through to plain sendFile
+        console.error('[SEO] Failed to inject dynamic meta:', err);
       }
     }
 
@@ -450,7 +496,10 @@ async function getPublicStore(slug?: string) {
   if (!slug) return null;
   
   const rows = await query<any>(
-    `SELECT * FROM stores WHERE slug = $1 AND active = true LIMIT 1`,
+    `SELECT s.*, i.name AS institution_name, i.logo_url AS institution_logo
+     FROM stores s
+     LEFT JOIN institutions i ON i.id = s.institution_id
+     WHERE s.slug = $1 AND s.active = true LIMIT 1`,
     [slug]
   );
 
@@ -509,14 +558,26 @@ async function requireAdminStore(req: AuthedRequest, res: express.Response, bypa
       return null;
     }
 
-    const isTrialActive = store.trial_ends_at ? new Date(store.trial_ends_at) > new Date() : false;
-    const isSubActive = store.subscription_status === 'active';
-    const isPaymentDue = ['canceled', 'past_due', 'unpaid'].includes(store.subscription_status);
+    const now = Date.now();
+    const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+
+    const isSponsoredActive = store.is_sponsored && store.sponsored_expires_at ? new Date(store.sponsored_expires_at).getTime() > now : false;
+    const isSponsoredInGrace = store.is_sponsored && store.sponsored_expires_at
+      ? (now - new Date(store.sponsored_expires_at).getTime() < GRACE_PERIOD_MS) && (now > new Date(store.sponsored_expires_at).getTime())
+      : false;
+
+    const isTrialActive = store.trial_ends_at ? new Date(store.trial_ends_at).getTime() > now : false;
+    const isTrialInGrace = store.trial_ends_at
+      ? (now - new Date(store.trial_ends_at).getTime() < GRACE_PERIOD_MS) && (now > new Date(store.trial_ends_at).getTime())
+      : false;
+
+    const isSubActive = store.subscription_status === 'active' || isSponsoredActive || isSponsoredInGrace || isTrialInGrace;
+    const isPaymentDue = ['canceled', 'past_due', 'unpaid'].includes(store.subscription_status) && !isSponsoredActive && !isSponsoredInGrace;
     if (!isSubActive && (!isTrialActive || isPaymentDue)) {
       res.status(402).json({
         error: 'Payment Required',
         code: 'SUBSCRIPTION_EXPIRED',
-        message: 'Your trial or subscription has expired or is unpaid. Please subscribe to continue using the platform.'
+        message: 'Your trial or subscription has expired (past 7-day grace period). Please subscribe to continue using the platform.'
       });
       return null;
     }
@@ -527,17 +588,26 @@ async function requireAdminStore(req: AuthedRequest, res: express.Response, bypa
 
 function isStorePubliclyLive(store: any): boolean {
   if (!store || !store.active || store.on_hold) return false;
-  if (['canceled', 'past_due', 'unpaid'].includes(store.subscription_status)) return false;
-  if (store.subscription_status === 'active') return true;
-  if (store.trial_ends_at && new Date(store.trial_ends_at) > new Date()) return true;
+  const now = Date.now();
+  const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+
+  const isSponsoredActive = store.is_sponsored && store.sponsored_expires_at && new Date(store.sponsored_expires_at).getTime() > now;
+  const isSponsoredInGrace = store.is_sponsored && store.sponsored_expires_at && (now - new Date(store.sponsored_expires_at).getTime() < GRACE_PERIOD_MS);
+
+  if (['canceled', 'past_due', 'unpaid'].includes(store.subscription_status) && !isSponsoredActive && !isSponsoredInGrace) return false;
+  if (store.subscription_status === 'active' || isSponsoredActive || isSponsoredInGrace) return true;
+  if (store.trial_ends_at && new Date(store.trial_ends_at).getTime() > now) return true;
+  if (store.trial_ends_at && (now - new Date(store.trial_ends_at).getTime() < GRACE_PERIOD_MS)) return true;
   return false;
 }
 
 function normalizeProduct(row: any) {
+  const numericPrice = Number(row?.price || 0);
   return row
     ? {
         ...row,
-        price: Number(row.price),
+        price: numericPrice,
+        price_formatted: numericPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       }
     : row;
 }
@@ -615,6 +685,213 @@ app.get('/api/products', async (req, res, next) => {
         );
 
     res.json(normalizeProducts(rows));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Rate limiting for order creation (OF-10) ─────────────────────────────────
+const orderIpLimits = new Map<string, { count: number; resetAt: number }>();
+function checkOrderRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = orderIpLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    orderIpLimits.set(ip, { count: 1, resetAt: now + 5 * 60 * 1000 });
+    return true;
+  }
+  if (entry.count >= 20) return false;
+  entry.count++;
+  return true;
+}
+
+app.get('/api/products/:id', async (req, res, next) => {
+  try {
+    const store = await getPublicStore(String(req.query.store || '') || undefined);
+    if (!store) {
+      res.status(404).json({ error: 'Store not found' });
+      return;
+    }
+    const rows = await query('SELECT * FROM products WHERE id = $1 AND store_id = $2 LIMIT 1', [req.params.id, store.id]);
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Product not found' });
+      return;
+    }
+    res.json(normalizeProduct(rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/store/platforms', async (req, res, next) => {
+  try {
+    const store = await getPublicStore(String(req.query.store || '') || undefined);
+    if (!store) {
+      res.json([]);
+      return;
+    }
+    const rows = await query('SELECT platform, handle FROM store_platforms WHERE store_id = $1', [store.id]);
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/stats/visit', async (req, res, next) => {
+  try {
+    const { store_slug, source } = req.body;
+    if (!store_slug) {
+      res.status(400).json({ error: 'store_slug is required' });
+      return;
+    }
+
+    const stores = await query<any>('SELECT id FROM stores WHERE slug = $1 LIMIT 1', [store_slug]);
+    if (stores.length === 0) {
+      res.status(404).json({ error: 'Store not found' });
+      return;
+    }
+
+    const trafficSource = (source || 'direct').toLowerCase();
+    await query(
+      `INSERT INTO daily_stats (store_id, date, source, visits)
+       VALUES ($1, CURRENT_DATE, $2, 1)
+       ON CONFLICT (store_id, date, source)
+       DO UPDATE SET visits = daily_stats.visits + 1`,
+      [stores[0].id, trafficSource]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/orders/backup', async (req, res, next) => {
+  try {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    if (!checkOrderRateLimit(ip)) {
+      res.status(429).json({ error: 'Too many orders placed from this network. Please wait a moment.' });
+      return;
+    }
+
+    let bodyData = req.body;
+    if (typeof bodyData === 'string') {
+      try {
+        bodyData = JSON.parse(bodyData);
+      } catch {}
+    }
+
+    const {
+      order_number,
+      public_token,
+      store_slug,
+      store_id,
+      customer_name,
+      customer_phone,
+      location,
+      items,
+      delivery_fee,
+      total,
+      source,
+      notes,
+    } = bodyData || {};
+
+    if (!customer_name || !location || !items || total === undefined) {
+      res.status(400).json({ error: 'Missing required order fields (customer_name, location, items, total)' });
+      return;
+    }
+
+    let store: any = null;
+    if (store_id) {
+      const rows = await query<any>('SELECT id, business_name, slug FROM stores WHERE id = $1 LIMIT 1', [store_id]);
+      if (rows[0]) store = rows[0];
+    }
+    if (!store && store_slug) {
+      const rows = await query<any>('SELECT id, business_name, slug FROM stores WHERE slug = $1 LIMIT 1', [store_slug]);
+      if (rows[0]) store = rows[0];
+    }
+
+    if (!store) {
+      res.status(404).json({ error: 'Store not found' });
+      return;
+    }
+
+    const orderNum = order_number || `CR-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+    const token = public_token || `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+    const trafficSource = (source || 'direct').toLowerCase();
+
+    // Insert order (text-only backup, < 1 KB target, OF-5)
+    const [insertedOrder] = await query<any>(
+      `INSERT INTO orders (
+        order_number, public_token, store_id, customer_name, customer_phone,
+        location, items, delivery_fee, total, source, status, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'New', $11)
+      RETURNING *`,
+      [
+        orderNum,
+        token,
+        store.id,
+        customer_name,
+        customer_phone || null,
+        location,
+        JSON.stringify(items),
+        Number(delivery_fee || 0),
+        Number(total),
+        trafficSource,
+        notes || null,
+      ]
+    );
+
+    // Insert initial status into audit events
+    await query(
+      `INSERT INTO order_events (order_id, status) VALUES ($1, 'New')`,
+      [insertedOrder.id]
+    ).catch(() => {});
+
+    // Increment daily counters (AN-4)
+    await query(
+      `INSERT INTO daily_stats (store_id, date, source, orders_started)
+       VALUES ($1, CURRENT_DATE, $2, 1)
+       ON CONFLICT (store_id, date, source)
+       DO UPDATE SET orders_started = daily_stats.orders_started + 1`,
+      [store.id, trafficSource]
+    ).catch(() => {});
+
+    // Asynchronously notify store via Web Push (OF-6, PW-3)
+    notifyStoreOfNewOrder(store.id, {
+      customer_name,
+      total: Number(total),
+      order_number: orderNum,
+      items_count: Array.isArray(items) ? items.length : 1,
+    }).catch(err => console.error('[Push Notification Error]', err));
+
+    res.status(201).json({
+      success: true,
+      order_number: orderNum,
+      public_token: token,
+      order_id: insertedOrder.id,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/orders/track/:publicToken', async (req, res, next) => {
+  try {
+    const { publicToken } = req.params;
+    const rows = await query<any>(
+      `SELECT o.*, s.business_name, s.whatsapp_number, s.slug as store_slug
+       FROM orders o
+       JOIN stores s ON s.id = o.store_id
+       WHERE o.public_token = $1 LIMIT 1`,
+      [publicToken]
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    res.json(rows[0]);
   } catch (error) {
     next(error);
   }
@@ -741,12 +1018,24 @@ app.get('/api/admin/billing/status', async (req: AuthedRequest, res, next) => {
 
     const trialEnds = store.trial_ends_at ? new Date(store.trial_ends_at) : null;
     const isTrialActive = trialEnds ? trialEnds > new Date() : false;
+    const isSponsoredActive = store.is_sponsored && store.sponsored_expires_at ? new Date(store.sponsored_expires_at) > new Date() : false;
     const isSubActive = store.subscription_status === 'active';
-    const isActive = isTrialActive || isSubActive;
+    const isActive = isTrialActive || isSubActive || isSponsoredActive;
 
-    const daysLeft = trialEnds 
-      ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-      : 0;
+    let daysLeft = 0;
+    if (isSponsoredActive && store.sponsored_expires_at) {
+      daysLeft = Math.max(0, Math.ceil((new Date(store.sponsored_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    } else if (trialEnds) {
+      daysLeft = Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    }
+
+    let institutionInfo = null;
+    if (store.institution_id) {
+      const instRows = await query<any>('SELECT name, logo_url FROM institutions WHERE id = $1', [store.institution_id]);
+      if (instRows.length > 0) {
+        institutionInfo = instRows[0];
+      }
+    }
 
     res.json({
       subscription_status: store.subscription_status,
@@ -754,7 +1043,11 @@ app.get('/api/admin/billing/status', async (req: AuthedRequest, res, next) => {
       paystack_subscription_code: store.paystack_subscription_code,
       paystack_customer_code: store.paystack_customer_code,
       is_active: isActive,
-      days_left: daysLeft
+      days_left: daysLeft,
+      is_sponsored: !!store.is_sponsored,
+      sponsored_expires_at: store.sponsored_expires_at,
+      institution_name: institutionInfo?.name || null,
+      institution_logo: institutionInfo?.logo_url || null,
     });
   } catch (error) {
     next(error);
@@ -899,6 +1192,37 @@ app.put('/api/admin/store', async (req: AuthedRequest, res, next) => {
       formattedWhatsapp = '233' + formattedWhatsapp.slice(1);
     }
 
+    // Slug change logic with 30-day throttle (ST-2)
+    let newSlug = store.slug;
+    if (payload.slug && payload.slug.trim() && payload.slug.trim().toLowerCase() !== store.slug) {
+      const candidateSlug = payload.slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (candidateSlug.length < 3) {
+        res.status(400).json({ error: 'Store link slug must be at least 3 characters long.' });
+        return;
+      }
+
+      if (store.slug_changed_at) {
+        const lastChanged = new Date(store.slug_changed_at).getTime();
+        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        if (Date.now() - lastChanged < thirtyDaysMs) {
+          const daysLeft = Math.ceil((lastChanged + thirtyDaysMs - Date.now()) / (24 * 60 * 60 * 1000));
+          res.status(400).json({
+            error: `Store link slug can only be changed once every 30 days. You can change it again in ${daysLeft} days.`
+          });
+          return;
+        }
+      }
+
+      const existingSlug = await query<any>('SELECT id FROM stores WHERE slug = $1 AND id != $2', [candidateSlug, store.id]);
+      if (existingSlug.length > 0) {
+        res.status(400).json({ error: 'This store link slug is already taken by another store.' });
+        return;
+      }
+
+      newSlug = candidateSlug;
+      await query('UPDATE stores SET slug = $1, slug_changed_at = now() WHERE id = $2', [newSlug, store.id]);
+    }
+
     const rows = await query<any>(
       `UPDATE stores
        SET business_name = $1,
@@ -908,8 +1232,11 @@ app.put('/api/admin/store', async (req: AuthedRequest, res, next) => {
            hero_banner_url = $5,
            location = $6,
            facebook_url = $7,
-           instagram_url = $8
-       WHERE id = $9
+           instagram_url = $8,
+           is_closed = COALESCE($9, is_closed),
+           closed_message = COALESCE($10, closed_message),
+           delivery_settings = COALESCE($11, delivery_settings)
+       WHERE id = $12
        RETURNING *`,
       [
         payload.business_name,
@@ -920,11 +1247,164 @@ app.put('/api/admin/store', async (req: AuthedRequest, res, next) => {
         payload.location || null,
         payload.facebook_url || null,
         payload.instagram_url || null,
+        payload.is_closed ?? null,
+        payload.closed_message ?? null,
+        payload.delivery_settings ? JSON.stringify(payload.delivery_settings) : null,
         store.id,
       ]
     );
 
     res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Store Platforms Management (ST-1) ──────────────────────────────────────────
+app.get('/api/admin/platforms', async (req: AuthedRequest, res, next) => {
+  try {
+    const store = await requireAdminStore(req, res);
+    if (!store) return;
+    const rows = await query('SELECT id, platform, handle FROM store_platforms WHERE store_id = $1 ORDER BY platform ASC', [store.id]);
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/admin/platforms', async (req: AuthedRequest, res, next) => {
+  try {
+    const store = await requireAdminStore(req, res);
+    if (!store) return;
+
+    const { platforms } = req.body;
+    if (!Array.isArray(platforms)) {
+      res.status(400).json({ error: 'platforms array is required' });
+      return;
+    }
+
+    await query('DELETE FROM store_platforms WHERE store_id = $1', [store.id]);
+
+    for (const p of platforms) {
+      if (p.platform) {
+        await query(
+          'INSERT INTO store_platforms (store_id, platform, handle) VALUES ($1, $2, $3) ON CONFLICT (store_id, platform) DO UPDATE SET handle = $3',
+          [store.id, p.platform.toLowerCase(), p.handle || null]
+        );
+      }
+    }
+
+    const rows = await query('SELECT id, platform, handle FROM store_platforms WHERE store_id = $1 ORDER BY platform ASC', [store.id]);
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Seller Orders Management (OM-1, OM-2, OM-3) ──────────────────────────────
+app.get('/api/admin/orders', async (req: AuthedRequest, res, next) => {
+  try {
+    const store = await requireAdminStore(req, res);
+    if (!store) return;
+
+    const { status, source, search } = req.query;
+    let sqlQuery = 'SELECT * FROM orders WHERE store_id = $1';
+    const params: any[] = [store.id];
+
+    if (status && status !== 'all') {
+      params.push(status);
+      sqlQuery += ` AND status = $${params.length}`;
+    }
+
+    if (source && source !== 'all') {
+      params.push(source);
+      sqlQuery += ` AND source = $${params.length}`;
+    }
+
+    if (search && String(search).trim()) {
+      params.push(`%${String(search).trim()}%`);
+      sqlQuery += ` AND (customer_name ILIKE $${params.length} OR order_number ILIKE $${params.length})`;
+    }
+
+    sqlQuery += ' ORDER BY created_at DESC LIMIT 100';
+
+    const rows = await query(sqlQuery, params);
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/admin/orders/:id/status', async (req: AuthedRequest, res, next) => {
+  try {
+    const store = await requireAdminStore(req, res);
+    if (!store) return;
+
+    const { status } = req.body;
+    const validStatuses = ['New', 'Received', 'Preparing', 'Ready', 'Out for delivery', 'Completed', 'Cancelled'];
+    if (!validStatuses.includes(status)) {
+      res.status(400).json({ error: 'Invalid status' });
+      return;
+    }
+
+    const rows = await query<any>(
+      `UPDATE orders
+       SET status = $1, status_updated_at = now(), updated_at = now()
+       WHERE id = $2 AND store_id = $3
+       RETURNING *`,
+      [status, req.params.id, store.id]
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    await query('INSERT INTO order_events (order_id, status) VALUES ($1, $2)', [req.params.id, status]).catch(() => {});
+
+    res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Web Push Subscriptions for Sellers (PW-2, PW-3) ──────────────────────────
+app.get('/api/admin/push/vapid-public-key', async (_req, res) => {
+  res.json({ publicKey: getVapidPublicKey() });
+});
+
+app.post('/api/admin/push/subscribe', async (req: AuthedRequest, res, next) => {
+  try {
+    const store = await requireAdminStore(req, res);
+    if (!store) return;
+
+    const { endpoint, keys } = req.body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      res.status(400).json({ error: 'Invalid push subscription payload' });
+      return;
+    }
+
+    await query(
+      `INSERT INTO push_subscriptions (store_id, endpoint, p256dh, auth, last_success_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (endpoint)
+       DO UPDATE SET store_id = $1, p256dh = $3, auth = $4, last_success_at = now()`,
+      [store.id, endpoint, keys.p256dh, keys.auth]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/admin/push/unsubscribe', async (req: AuthedRequest, res, next) => {
+  try {
+    const { endpoint } = req.body;
+    if (endpoint) {
+      await query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
+    }
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }
@@ -940,13 +1420,18 @@ app.get('/api/admin/dashboard', async (req: AuthedRequest, res, next) => {
       categoryCounts,
       inStockCounts,
       outOfStockCounts,
+      orderCounts,
+      newOrderCounts,
       recentProducts,
+      recentOrders,
       productsByCategory,
     ] = await Promise.all([
       query<{ count: string }>('SELECT COUNT(*)::text AS count FROM products WHERE store_id = $1', [store.id]),
       query<{ count: string }>('SELECT COUNT(*)::text AS count FROM categories WHERE store_id = $1', [store.id]),
       query<{ count: string }>('SELECT COUNT(*)::text AS count FROM products WHERE store_id = $1 AND in_stock = true', [store.id]),
       query<{ count: string }>('SELECT COUNT(*)::text AS count FROM products WHERE store_id = $1 AND in_stock = false', [store.id]),
+      query<{ count: string }>('SELECT COUNT(*)::text AS count FROM orders WHERE store_id = $1', [store.id]).catch(() => [{ count: '0' }]),
+      query<{ count: string }>('SELECT COUNT(*)::text AS count FROM orders WHERE store_id = $1 AND status = \'New\'', [store.id]).catch(() => [{ count: '0' }]),
       query<{ id: string; name: string; price: number; in_stock: boolean; image_url: string | null; category_name: string | null; created_at: string }>(
         `SELECT p.id, p.name, p.price, p.in_stock, p.image_url, c.name AS category_name, p.created_at
          FROM products p
@@ -956,6 +1441,13 @@ app.get('/api/admin/dashboard', async (req: AuthedRequest, res, next) => {
          LIMIT 5`,
         [store.id]
       ),
+      query<any>(
+        `SELECT * FROM orders
+         WHERE store_id = $1
+         ORDER BY created_at DESC
+         LIMIT 5`,
+        [store.id]
+      ).catch(() => []),
       query<{ name: string; count: string }>(
         `SELECT COALESCE(c.name, 'Uncategorized') AS name, COUNT(*)::text AS count
          FROM products p
@@ -973,7 +1465,10 @@ app.get('/api/admin/dashboard', async (req: AuthedRequest, res, next) => {
       categories: Number(categoryCounts[0]?.count || 0),
       in_stock_products: Number(inStockCounts[0]?.count || 0),
       out_of_stock_products: Number(outOfStockCounts[0]?.count || 0),
+      orders_count: Number(orderCounts[0]?.count || 0),
+      new_orders_count: Number(newOrderCounts[0]?.count || 0),
       recent_products: recentProducts,
+      recent_orders: recentOrders,
       products_by_category: productsByCategory.map(r => ({ name: r.name, count: Number(r.count) })),
       store_created_at: store.created_at || null,
     });
@@ -1231,6 +1726,13 @@ app.get('/api/superadmin/stats', requireSuperAdmin, async (_req: express.Request
       SELECT COUNT(*)::int AS total_categories FROM categories
     `);
 
+    const [orderStats] = await query<any>(`
+      SELECT
+        COUNT(*)::int AS total_orders,
+        COUNT(CASE WHEN created_at >= CURRENT_DATE THEN 1 END)::int AS orders_today
+      FROM orders
+    `).catch(() => [{ total_orders: 0, orders_today: 0 }]);
+
     res.json({
       total_stores: storeStats?.total_stores || 0,
       active_stores: storeStats?.active_stores || 0,
@@ -1239,7 +1741,25 @@ app.get('/api/superadmin/stats', requireSuperAdmin, async (_req: express.Request
       on_hold_stores: storeStats?.on_hold_stores || 0,
       total_products: productStats?.total_products || 0,
       total_categories: categoryStats?.total_categories || 0,
+      total_orders: orderStats?.total_orders || 0,
+      orders_today: orderStats?.orders_today || 0,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/superadmin/orders — platform-wide recent orders for standalone superadmin repo
+app.get('/api/superadmin/orders', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const rows = await query<any>(`
+      SELECT o.*, s.business_name, s.slug as store_slug
+      FROM orders o
+      JOIN stores s ON s.id = o.store_id
+      ORDER BY o.created_at DESC
+      LIMIT 100
+    `).catch(() => []);
+    res.json(rows);
   } catch (error) {
     next(error);
   }
@@ -1580,6 +2100,583 @@ app.post('/api/superadmin/payments/record', requireSuperAdmin, async (req: expre
     next(error);
   }
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// PHASE 2 — Institution SaaS Endpoints
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Admin seller: claim an institution access code ───────────────────────────
+// POST /api/admin/claim-access-code
+app.post('/api/admin/claim-access-code', async (req: AuthedRequest, res: express.Response, next: express.NextFunction) => {
+  try {
+    const userId = req.userId as string;
+    const { code } = req.body as { code: string };
+
+    if (!code || typeof code !== 'string') {
+      res.status(400).json({ error: 'access_code is required.' });
+      return;
+    }
+
+    // Fetch the store for this seller
+    const storeRows = await query<any>('SELECT id, is_sponsored FROM stores WHERE owner_id = $1 LIMIT 1', [userId]);
+    if (storeRows.length === 0) {
+      res.status(404).json({ error: 'No store found for this account.' });
+      return;
+    }
+    const store = storeRows[0];
+
+    // Look up the access code
+    const codeRows = await query<any>(
+      `SELECT gac.*, c.institution_id, i.name AS institution_name, i.revenue_split_pct,
+              i.logo_url AS institution_logo
+       FROM graduate_access_codes gac
+       JOIN cohorts c ON gac.cohort_id = c.id
+       JOIN institutions i ON c.institution_id = i.id
+       WHERE gac.code = $1`,
+      [code.trim().toUpperCase()]
+    );
+
+    if (codeRows.length === 0) {
+      res.status(404).json({ error: 'Invalid access code. Please check and try again.' });
+      return;
+    }
+
+    const ac = codeRows[0];
+
+    if (ac.status === 'revoked') {
+      res.status(403).json({ error: 'This access code has been revoked by the institution administrator.' });
+      return;
+    }
+
+    if (ac.store_id || ac.status === 'redeemed') {
+      res.status(409).json({ error: 'This access code has already been claimed.' });
+      return;
+    }
+
+    if (new Date(ac.expires_at) < new Date() || ac.status === 'expired') {
+      res.status(410).json({ error: 'This access code has expired.' });
+      return;
+    }
+
+    // Claim the code — give 6 months sponsorship from today
+    const now = new Date();
+    const sponsoredUntil = new Date(now);
+    sponsoredUntil.setMonth(sponsoredUntil.getMonth() + 6);
+
+    await query(
+      `UPDATE graduate_access_codes
+       SET store_id = $1, claimed_at = now(), status = 'redeemed'
+       WHERE id = $2`,
+      [store.id, ac.id]
+    );
+
+    await query(
+      `UPDATE stores
+       SET institution_id = $1, cohort_id = $2,
+           is_sponsored = true, sponsored_expires_at = $3,
+           subscription_status = 'active',
+           updated_at = now()
+       WHERE id = $4`,
+      [ac.institution_id, ac.cohort_id, sponsoredUntil.toISOString(), store.id]
+    );
+
+    // IN-7: Create ledger entry for this redemption
+    const grossAmount = 1000.00;
+    const splitPct = Number(ac.revenue_split_pct || 55.00);
+    const schoolAmount = (grossAmount * splitPct) / 100;
+    const cartsyAmount = grossAmount - schoolAmount;
+    const periodStart = now.toISOString().slice(0, 10);
+    const periodEnd = sponsoredUntil.toISOString().slice(0, 10);
+
+    try {
+      await query(
+        `INSERT INTO ledger_entries
+          (store_id, institution_id, access_code_id, amount_total, amount_cartsy, amount_institution, status, period_start, period_end)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)`,
+        [store.id, ac.institution_id, ac.id, grossAmount, cartsyAmount, schoolAmount, periodStart, periodEnd]
+      );
+    } catch (ledgerErr) {
+      console.warn('[Ledger] Failed to create redemption entry:', ledgerErr);
+    }
+
+    res.json({
+      success: true,
+      institution_name: ac.institution_name,
+      institution_logo: ac.institution_logo,
+      sponsored_until: sponsoredUntil.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/admin/sponsorship — get sponsorship status for the current store
+app.get('/api/admin/sponsorship', async (req: AuthedRequest, res: express.Response, next: express.NextFunction) => {
+  try {
+    const userId = req.userId as string;
+    const rows = await query<any>(
+      `SELECT s.is_sponsored, s.sponsored_expires_at, s.institution_id, s.cohort_id,
+              i.name AS institution_name, i.logo_url AS institution_logo
+       FROM stores s
+       LEFT JOIN institutions i ON s.institution_id = i.id
+       WHERE s.owner_id = $1 LIMIT 1`,
+      [userId]
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Store not found.' });
+      return;
+    }
+    res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Superadmin: Institution management ───────────────────────────────────────
+
+// GET /api/superadmin/institutions
+app.get('/api/superadmin/institutions', requireSuperAdmin, async (_req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const rows = await query<any>(`
+      SELECT i.*,
+             COUNT(DISTINCT c.id)   AS cohorts_count,
+             COUNT(DISTINCT gac.id) AS codes_total,
+             COUNT(DISTINCT gac.id) FILTER (WHERE gac.store_id IS NOT NULL) AS codes_claimed,
+             COUNT(DISTINCT s.id)   AS sponsored_stores
+      FROM institutions i
+      LEFT JOIN cohorts c ON c.institution_id = i.id
+      LEFT JOIN graduate_access_codes gac ON gac.cohort_id = c.id
+      LEFT JOIN stores s ON s.institution_id = i.id AND s.is_sponsored = true
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+    `);
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/superadmin/institutions
+app.post('/api/superadmin/institutions', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { name, slug, logo_url, contact_email, revenue_split_pct = 55 } = req.body as any;
+    if (!name || !slug) {
+      res.status(400).json({ error: 'name and slug are required.' });
+      return;
+    }
+    const cleanSlug = (slug as string).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const rows = await query<any>(
+      `INSERT INTO institutions (name, slug, logo_url, contact_email, revenue_split_pct)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [name, cleanSlug, logo_url || null, contact_email || null, revenue_split_pct]
+    );
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/superadmin/institutions/:id
+app.patch('/api/superadmin/institutions/:id', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { name, logo_url, contact_email, revenue_split_pct, active } = req.body as any;
+    const rows = await query<any>(
+      `UPDATE institutions
+       SET name = COALESCE($1, name),
+           logo_url = COALESCE($2, logo_url),
+           contact_email = COALESCE($3, contact_email),
+           revenue_split_pct = COALESCE($4, revenue_split_pct),
+           active = COALESCE($5, active),
+           updated_at = now()
+       WHERE id = $6 RETURNING *`,
+      [name ?? null, logo_url ?? null, contact_email ?? null, revenue_split_pct ?? null, active ?? null, id]
+    );
+    if (rows.length === 0) res.status(404).json({ error: 'Institution not found.' });
+    else res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/superadmin/institutions/:id/cohorts
+app.get('/api/superadmin/institutions/:id/cohorts', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id } = req.params;
+    const rows = await query<any>(
+      `SELECT c.*,
+              COUNT(gac.id) AS codes_total,
+              COUNT(gac.id) FILTER (WHERE gac.store_id IS NOT NULL) AS codes_claimed
+       FROM cohorts c
+       LEFT JOIN graduate_access_codes gac ON gac.cohort_id = c.id
+       WHERE c.institution_id = $1
+       GROUP BY c.id
+       ORDER BY c.year DESC, c.created_at DESC`,
+      [id]
+    );
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/superadmin/institutions/:id/cohorts
+app.post('/api/superadmin/institutions/:id/cohorts', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id: institution_id } = req.params;
+    const { name, year, graduation_date, access_code_prefix } = req.body as any;
+    if (!name || !year) {
+      res.status(400).json({ error: 'name and year are required.' });
+      return;
+    }
+    const rows = await query<any>(
+      `INSERT INTO cohorts (institution_id, name, year, graduation_date, access_code_prefix)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [institution_id, name, year, graduation_date || null, (access_code_prefix || '').toUpperCase()]
+    );
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/superadmin/cohorts/:id/access-codes/generate
+app.post('/api/superadmin/cohorts/:id/access-codes/generate', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id: cohort_id } = req.params;
+    const { count = 50 } = req.body as { count?: number };
+
+    const cohortRows = await query<any>('SELECT * FROM cohorts WHERE id = $1', [cohort_id]);
+    if (cohortRows.length === 0) {
+      res.status(404).json({ error: 'Cohort not found.' });
+      return;
+    }
+    const cohort = cohortRows[0];
+
+    // Codes expire 90 days after graduation, or 1 year from now if no graduation date
+    const expiresAt = cohort.graduation_date
+      ? new Date(new Date(cohort.graduation_date).getTime() + 90 * 24 * 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+
+    const prefix = cohort.access_code_prefix
+      ? `${cohort.access_code_prefix}-`
+      : `${String(cohort.year).slice(-2)}-`;
+
+    const crypto = await import('crypto');
+    const codes: string[] = [];
+    for (let i = 0; i < Math.min(count, 500); i++) {
+      codes.push(`${prefix}${crypto.randomBytes(4).toString('hex').toUpperCase()}`);
+    }
+
+    // Bulk insert, ignore duplicates
+    const values = codes.map((c, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ');
+    const params = codes.flatMap(c => [cohort_id, c, expiresAt]);
+    await query(
+      `INSERT INTO graduate_access_codes (cohort_id, code, expires_at) VALUES ${values} ON CONFLICT (code) DO NOTHING`,
+      params
+    );
+
+    res.json({ generated: codes.length, expires_at: expiresAt, sample: codes.slice(0, 5) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/superadmin/cohorts/:id/access-codes — list codes for a cohort
+app.get('/api/superadmin/cohorts/:id/access-codes', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id } = req.params;
+    const rows = await query<any>(
+      `SELECT gac.*, s.business_name AS store_name, s.slug AS store_slug
+       FROM graduate_access_codes gac
+       LEFT JOIN stores s ON s.id = gac.store_id
+       WHERE gac.cohort_id = $1
+       ORDER BY gac.created_at DESC`,
+      [id]
+    );
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/superadmin/cohorts/:id/graduates/bulk — upload graduate list by CSV or JSON (IN-3)
+app.post('/api/superadmin/cohorts/:id/graduates/bulk', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id: cohort_id } = req.params;
+    const { graduates = [], csv_text } = req.body as {
+      graduates?: Array<{ name: string; phone?: string; email?: string; course?: string }>;
+      csv_text?: string;
+    };
+
+    const cohortRows = await query<any>('SELECT * FROM cohorts WHERE id = $1', [cohort_id]);
+    if (cohortRows.length === 0) {
+      res.status(404).json({ error: 'Cohort not found.' });
+      return;
+    }
+    const cohort = cohortRows[0];
+
+    const parsedGraduates: Array<{ name: string; phone?: string; email?: string; course?: string }> = [...graduates];
+
+    // If CSV text is provided, parse it (format: name,phone,email,course)
+    if (csv_text && typeof csv_text === 'string') {
+      const lines = csv_text.split(/\r?\n/).filter(line => line.trim().length > 0);
+      // Skip header if first line contains header keywords
+      const startIndex = lines[0].toLowerCase().includes('name') ? 1 : 0;
+      for (let i = startIndex; i < lines.length; i++) {
+        const parts = lines[i].split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+        if (parts[0]) {
+          parsedGraduates.push({
+            name: parts[0],
+            phone: parts[1] || undefined,
+            email: parts[2] || undefined,
+            course: parts[3] || undefined,
+          });
+        }
+      }
+    }
+
+    if (parsedGraduates.length === 0) {
+      res.status(400).json({ error: 'No graduates provided. Supply a graduates array or csv_text.' });
+      return;
+    }
+
+    const expiresAt = cohort.graduation_date
+      ? new Date(new Date(cohort.graduation_date).getTime() + 90 * 24 * 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+
+    const prefix = cohort.access_code_prefix
+      ? `${cohort.access_code_prefix}-`
+      : `${String(cohort.year).slice(-2)}-`;
+
+    const crypto = await import('crypto');
+    let inserted = 0;
+    const errors: Array<{ row: number; name: string; error: string }> = [];
+
+    for (let i = 0; i < parsedGraduates.length; i++) {
+      const g = parsedGraduates[i];
+      if (!g.name || !g.name.trim()) {
+        errors.push({ row: i + 1, name: '', error: 'Graduate name is required' });
+        continue;
+      }
+
+      const code = `${prefix}${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      try {
+        await query(
+          `INSERT INTO graduate_access_codes
+             (cohort_id, code, graduate_name, graduate_phone, graduate_email, course, expires_at, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'issued')`,
+          [cohort_id, code, g.name.trim(), g.phone || null, g.email || null, g.course || null, expiresAt]
+        );
+        inserted++;
+      } catch (err: any) {
+        errors.push({ row: i + 1, name: g.name, error: err.message || 'Database error' });
+      }
+    }
+
+    res.json({
+      success: true,
+      total_submitted: parsedGraduates.length,
+      created: inserted,
+      errors,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/superadmin/access-codes/:id/revoke — revoke an access code (IN-4, IN-5)
+app.patch('/api/superadmin/access-codes/:id/revoke', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id } = req.params;
+    const rows = await query<any>(
+      `UPDATE graduate_access_codes
+       SET status = 'revoked'
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Access code not found.' });
+      return;
+    }
+
+    const code = rows[0];
+    // If it was claimed by a store, also unpublish / revoke sponsorship on store
+    if (code.store_id) {
+      await query(
+        `UPDATE stores
+         SET is_sponsored = false,
+             subscription_status = 'unpaid',
+             updated_at = now()
+         WHERE id = $1`,
+        [code.store_id]
+      );
+    }
+
+    res.json({ success: true, access_code: code });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/superadmin/institutions/:id/stats — institution metrics (IN-6, IN-10: privacy-first, zero customer data)
+app.get('/api/superadmin/institutions/:id/stats', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const instRows = await query<any>('SELECT * FROM institutions WHERE id = $1', [id]);
+    if (instRows.length === 0) {
+      res.status(404).json({ error: 'Institution not found.' });
+      return;
+    }
+    const inst = instRows[0];
+
+    // Counts: graduates, codes claimed, stores live
+    const [counts] = await query<any>(
+      `SELECT
+         COUNT(gac.id) AS total_graduates,
+         COUNT(gac.id) FILTER (WHERE gac.status = 'redeemed' OR gac.store_id IS NOT NULL) AS codes_redeemed,
+         COUNT(gac.id) FILTER (WHERE gac.status = 'revoked') AS codes_revoked,
+         COUNT(DISTINCT s.id) FILTER (WHERE s.active = true AND s.on_hold = false AND s.is_sponsored = true) AS stores_live
+       FROM cohorts c
+       LEFT JOIN graduate_access_codes gac ON gac.cohort_id = c.id
+       LEFT JOIN stores s ON s.institution_id = c.institution_id
+       WHERE c.institution_id = $1`,
+      [id]
+    );
+
+    // Order counts across all graduate stores of this institution (COUNT only, zero customer PII / order contents, IN-6 & IN-10)
+    const [orderStats] = await query<any>(
+      `SELECT COUNT(o.id) AS total_orders
+       FROM orders o
+       JOIN stores s ON s.id = o.store_id
+       WHERE s.institution_id = $1`,
+      [id]
+    );
+
+    // Revenue ledger totals for this institution
+    const [ledgerStats] = await query<any>(
+      `SELECT
+         COALESCE(SUM(amount_institution) FILTER (WHERE status = 'pending'), 0) AS money_owed_to_school,
+         COALESCE(SUM(amount_institution) FILTER (WHERE status = 'paid'), 0) AS money_paid_to_school,
+         COALESCE(SUM(amount_total), 0) AS total_gross_generated
+       FROM ledger_entries
+       WHERE institution_id = $1`,
+      [id]
+    );
+
+    res.json({
+      institution: {
+        id: inst.id,
+        name: inst.name,
+        slug: inst.slug,
+        revenue_split_pct: Number(inst.revenue_split_pct),
+        active: inst.active,
+      },
+      graduates: Number(counts?.total_graduates || 0),
+      codes_redeemed: Number(counts?.codes_redeemed || 0),
+      codes_revoked: Number(counts?.codes_revoked || 0),
+      stores_live: Number(counts?.stores_live || 0),
+      total_orders_count: Number(orderStats?.total_orders || 0),
+      money_owed_to_school: Number(ledgerStats?.money_owed_to_school || 0),
+      money_paid_to_school: Number(ledgerStats?.money_paid_to_school || 0),
+      total_gross_generated: Number(ledgerStats?.total_gross_generated || 0),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Superadmin: Revenue Ledger ────────────────────────────────────────────────
+
+// GET /api/superadmin/ledger
+app.get('/api/superadmin/ledger', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { status, institution_id } = req.query as Record<string, string>;
+    let sql = `
+      SELECT le.*,
+             s.business_name AS store_name, s.slug AS store_slug,
+             i.name AS institution_name
+      FROM ledger_entries le
+      JOIN stores s ON s.id = le.store_id
+      JOIN institutions i ON i.id = le.institution_id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (status) { sql += ` AND le.status = $${params.length + 1}`; params.push(status); }
+    if (institution_id) { sql += ` AND le.institution_id = $${params.length + 1}`; params.push(institution_id); }
+    sql += ' ORDER BY le.period_start DESC';
+    const rows = await query<any>(sql, params);
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/superadmin/ledger/:id/pay — mark ledger entry as paid
+app.patch('/api/superadmin/ledger/:id/pay', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id } = req.params;
+    const rows = await query<any>(
+      `UPDATE ledger_entries SET status = 'paid', paid_at = now() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (rows.length === 0) res.status(404).json({ error: 'Ledger entry not found.' });
+    else res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/superadmin/ledger/generate — generate monthly ledger entries for all sponsored stores
+app.post('/api/superadmin/ledger/generate', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { period_start, period_end } = req.body as { period_start: string; period_end: string };
+    if (!period_start || !period_end) {
+      res.status(400).json({ error: 'period_start and period_end (YYYY-MM-DD) are required.' });
+      return;
+    }
+
+    // Find all actively sponsored stores with an institution
+    const sponsoredStores = await query<any>(
+      `SELECT s.id AS store_id, s.institution_id, i.revenue_split_pct
+       FROM stores s
+       JOIN institutions i ON i.id = s.institution_id
+       WHERE s.is_sponsored = true
+         AND s.sponsored_expires_at > now()
+         AND i.active = true`,
+      []
+    );
+
+    let created = 0;
+    for (const store of sponsoredStores) {
+      const institutionShare = (1000 * store.revenue_split_pct) / 100;
+      const cartsyShare = 1000 - institutionShare;
+      try {
+        await query(
+          `INSERT INTO ledger_entries
+             (store_id, institution_id, amount_total, amount_cartsy, amount_institution, period_start, period_end)
+           VALUES ($1, $2, 1000, $3, $4, $5, $6)
+           ON CONFLICT DO NOTHING`,
+          [store.store_id, store.institution_id, cartsyShare, institutionShare, period_start, period_end]
+        );
+        created++;
+      } catch (_) { /* skip duplicates */ }
+    }
+
+    res.json({ created, total_stores: sponsoredStores.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// END PHASE 2
+// ════════════════════════════════════════════════════════════════════════════
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(error);

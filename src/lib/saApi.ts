@@ -155,4 +155,103 @@ export const saApi = {
     saRequest<{ success: boolean; key: string }>(`/api/superadmin/settings/${encodeURIComponent(key)}`, {
       method: 'DELETE',
     }),
+
+  // Phase 2: Institution SaaS
+  getInstitutions: () => saRequest<any[]>('/api/superadmin/institutions'),
+
+  createInstitution: (data: {
+    name: string;
+    slug: string;
+    logo_url?: string;
+    contact_email?: string;
+    revenue_split_pct?: number;
+  }) =>
+    saRequest<any>('/api/superadmin/institutions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateInstitution: (id: string, data: any) =>
+    saRequest<any>(`/api/superadmin/institutions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  getCohorts: (institutionId: string) =>
+    saRequest<any[]>(`/api/superadmin/institutions/${institutionId}/cohorts`),
+
+  createCohort: (
+    institutionId: string,
+    data: {
+      name: string;
+      year: number;
+      graduation_date?: string;
+      access_code_prefix?: string;
+    }
+  ) =>
+    saRequest<any>(`/api/superadmin/institutions/${institutionId}/cohorts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  generateAccessCodes: (cohortId: string, count: number = 50) =>
+    saRequest<{ generated: number; expires_at: string; sample: string[] }>(
+      `/api/superadmin/cohorts/${cohortId}/access-codes/generate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ count }),
+      }
+    ),
+
+  getAccessCodes: (cohortId: string) =>
+    saRequest<any[]>(`/api/superadmin/cohorts/${cohortId}/access-codes`),
+
+  importGraduates: (
+    cohortId: string,
+    data: {
+      graduates?: Array<{ name: string; phone?: string; email?: string; course?: string }>;
+      csv_text?: string;
+    }
+  ) =>
+    saRequest<{ success: boolean; total_submitted: number; created: number; errors: any[] }>(
+      `/api/superadmin/cohorts/${cohortId}/graduates/bulk`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
+
+  revokeAccessCode: (codeId: string) =>
+    saRequest<{ success: boolean; access_code: any }>(`/api/superadmin/access-codes/${codeId}/revoke`, {
+      method: 'PATCH',
+    }),
+
+  getInstitutionStats: (id: string) =>
+    saRequest<{
+      institution: { id: string; name: string; slug: string; revenue_split_pct: number; active: boolean };
+      graduates: number;
+      codes_redeemed: number;
+      codes_revoked: number;
+      stores_live: number;
+      total_orders_count: number;
+      money_owed_to_school: number;
+      money_paid_to_school: number;
+      total_gross_generated: number;
+    }>(`/api/superadmin/institutions/${id}/stats`),
+
+  getLedger: (params?: { status?: string; institution_id?: string }) => {
+    const q = new URLSearchParams(params as any).toString();
+    return saRequest<any[]>(`/api/superadmin/ledger${q ? `?${q}` : ''}`);
+  },
+
+  payLedgerEntry: (id: string) =>
+    saRequest<any>(`/api/superadmin/ledger/${id}/pay`, {
+      method: 'PATCH',
+    }),
+
+  generateLedger: (period_start: string, period_end: string) =>
+    saRequest<{ created: number; total_stores: number }>('/api/superadmin/ledger/generate', {
+      method: 'POST',
+      body: JSON.stringify({ period_start, period_end }),
+    }),
 };

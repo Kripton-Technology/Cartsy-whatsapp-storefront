@@ -94,51 +94,51 @@ export function CategoryManager() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-brand-dark">
+            <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
                 <div className="relative">
-                    <div className="animate-spin rounded-full h-12 w-12 border-2 border-brand-steel/20 border-b-brand-cream"></div>
+                    <div className="animate-spin rounded-full h-10 w-10 border-2 border-slate-200 border-b-emerald-600"></div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="p-6 md:p-8 max-w-5xl mx-auto">
-            <div className="flex justify-between items-center mb-8">
+        <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+            <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-2xl font-bold text-brand-header">Categories</h1>
-                    <p className="text-brand-slate mt-1">Manage your product categories</p>
+                    <h1 className="text-2xl font-bold text-slate-900 font-display">Categories</h1>
+                    <p className="text-slate-500 text-xs mt-1">Manage your storefront product categories</p>
                 </div>
                 <button
                     onClick={() => openModal()}
-                    className="bg-brand-cream hover:bg-white text-brand-dark px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-brand-cream/5 hover:scale-[1.02] active:scale-[0.98]"
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-xs active:scale-95"
                 >
-                    <Plus size={20} />
+                    <Plus size={16} />
                     Add Category
                 </button>
             </div>
 
-            <div className="bg-brand-steel/10 rounded-3xl border border-brand-steel/15 overflow-hidden backdrop-blur-md">
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
                 <table className="w-full text-left border-collapse">
                     <thead>
-                        <tr className="bg-brand-dark/40 border-b border-brand-steel/15 text-sm font-semibold text-brand-slate">
+                        <tr className="bg-slate-50/80 border-b border-slate-200/80 text-xs font-bold text-slate-500 uppercase tracking-wider">
                             <th className="px-6 py-4">Name</th>
                             <th className="px-6 py-4 text-center">Status</th>
                             <th className="px-6 py-4 text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-brand-steel/10">
+                    <tbody className="divide-y divide-slate-100">
                         {categories.map((category) => (
-                            <tr key={category.id} className="hover:bg-brand-steel/10 transition-colors">
+                            <tr key={category.id} className="hover:bg-slate-50/60 transition-colors">
                                 <td className="px-6 py-4">
-                                    <span className="font-semibold text-brand-header">{category.name}</span>
+                                    <span className="font-bold text-slate-900 text-sm">{category.name}</span>
                                 </td>
                                 <td className="px-6 py-4 text-center">
                                     <button
                                         onClick={() => handleToggleActive(category.id, category.active)}
                                         className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${category.active
-                                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
-                                                : 'bg-brand-steel/20 text-brand-slate border-brand-steel/20 hover:bg-brand-steel/30'
+                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
                                             }`}
                                     >
                                         {category.active ? 'Active' : 'Hidden'}
@@ -148,17 +148,17 @@ export function CategoryManager() {
                                     <div className="flex justify-end gap-2">
                                         <button
                                             onClick={() => openModal(category)}
-                                            className="p-1.5 text-brand-cream hover:bg-brand-steel/30 rounded transition-colors"
+                                            className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                                             title="Edit category"
                                         >
-                                            <Edit2 size={18} />
+                                            <Edit2 size={16} />
                                         </button>
                                         <button
                                             onClick={() => handleDelete(category.id)}
-                                            className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
+                                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                                             title="Delete category"
                                         >
-                                            <Trash2 size={18} />
+                                            <Trash2 size={16} />
                                         </button>
                                     </div>
                                 </td>
@@ -167,7 +167,7 @@ export function CategoryManager() {
 
                         {categories.length === 0 && (
                             <tr>
-                                <td colSpan={3} className="px-6 py-8 text-center text-brand-slate">
+                                <td colSpan={3} className="px-6 py-12 text-center text-slate-500 text-xs">
                                     No categories found. Click "Add Category" to create one.
                                 </td>
                             </tr>
@@ -178,36 +178,36 @@ export function CategoryManager() {
 
             {/* Category Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
                     <form
                         onSubmit={handleSave}
-                        className="bg-brand-dark border border-brand-steel/20 rounded-3xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden relative"
+                        className="bg-white border border-slate-200/90 rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden relative"
                     >
                         {/* Header */}
-                        <div className="px-6 py-4 border-b border-brand-steel/15 flex justify-between items-center bg-brand-dark/40 flex-shrink-0">
-                            <h2 className="text-xl font-bold text-brand-header font-display">
+                        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white flex-shrink-0">
+                            <h2 className="text-xl font-bold text-slate-900 font-display">
                                 {editingCategory ? 'Edit Category' : 'Add New Category'}
                             </h2>
                             <button
                                 type="button"
                                 onClick={() => setIsModalOpen(false)}
-                                className="text-brand-slate hover:text-brand-header transition-colors p-1 hover:scale-105 active:scale-95"
+                                className="text-slate-400 hover:text-slate-700 transition-colors p-1"
                             >
-                                <X size={24} />
+                                <X size={20} />
                             </button>
                         </div>
 
                         {/* Scrollable Form Content */}
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-brand-steel/30 scrollbar-track-transparent">
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
                             <div className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-brand-slate mb-1.5">Category Name *</label>
+                                    <label className="block text-sm font-semibold text-slate-700 mb-1.5">Category Name *</label>
                                     <input
                                         type="text"
                                         required
                                         value={formData.name}
                                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        className="w-full px-4 py-2.5 bg-brand-dark/45 border border-brand-steel/20 text-brand-header rounded-xl focus:ring-2 focus:ring-brand-cream focus:border-transparent outline-none transition-all hover:border-brand-steel/30"
+                                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                                         placeholder="e.g., Electronics, Fashion"
                                         autoFocus
                                     />
@@ -223,10 +223,10 @@ export function CategoryManager() {
                                                     checked={formData.active}
                                                     onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
                                                 />
-                                                <div className={`block w-10 h-6 rounded-full transition-colors ${formData.active ? 'bg-brand-cream' : 'bg-brand-steel/30'}`}></div>
-                                                <div className={`absolute left-1 top-1 bg-brand-dark w-4 h-4 rounded-full transition-transform ${formData.active ? 'translate-x-4' : ''}`}></div>
+                                                <div className={`block w-10 h-6 rounded-full transition-colors ${formData.active ? 'bg-emerald-600' : 'bg-slate-300'}`}></div>
+                                                <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform shadow-xs ${formData.active ? 'translate-x-4' : ''}`}></div>
                                             </div>
-                                            <span className="text-sm font-semibold text-brand-slate">Active (Visible in storefront)</span>
+                                            <span className="text-sm font-semibold text-slate-700">Active (Visible in storefront)</span>
                                         </label>
                                     </div>
                                 )}
@@ -234,17 +234,17 @@ export function CategoryManager() {
                         </div>
 
                         {/* Footer */}
-                        <div className="px-6 py-4 border-t border-brand-steel/15 flex justify-end gap-3 bg-brand-dark/40 flex-shrink-0">
+                        <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3 bg-slate-50 flex-shrink-0">
                             <button
                                 type="button"
                                 onClick={() => setIsModalOpen(false)}
-                                className="px-6 py-2.5 border border-brand-steel/20 text-brand-slate rounded-xl hover:bg-brand-steel/10 font-bold transition-colors hover:text-brand-header"
+                                className="px-5 py-2.5 border border-slate-200 bg-white text-slate-700 rounded-xl hover:bg-slate-100 font-bold text-xs transition-colors"
                             >
                                 Cancel
                             </button>
                             <button
                                 type="submit"
-                                className="px-6 py-2.5 bg-brand-cream text-brand-dark rounded-xl hover:bg-white font-bold transition-colors shadow-sm hover:scale-[1.02] active:scale-[0.98]"
+                                className="px-6 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-bold text-xs transition-colors shadow-xs"
                             >
                                 {editingCategory ? 'Save Changes' : 'Create Category'}
                             </button>

@@ -5,17 +5,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Direct CSS Palette requested by user
-        'tea-green': '#c5efcb',
-        'dusty-olive': '#647a67',
-        'black': '#020402',
-        'carbon-black': '#1f241f',
-        'charcoal-brown': '#3c433b',
-        'dusty-olive-2': '#758173',
-        'muted-teal': '#8fa38a',
-        'celadon': '#a9c5a0',
-        'celadon-2': '#b8d2b3',
-        'tea-green-2': '#c6dec6',
+        // Direct CSS Palette - Light Mode SaaS (Images 1, 2, 3)
+        'tea-green': 'rgb(var(--color-brand-cream-rgb) / <alpha-value>)',
+        'dusty-olive': '#64748b',
+        'black': '#0f172a',
+        'carbon-black': '#ffffff',
+        'charcoal-brown': '#e2e8f0',
+        'dusty-olive-2': '#94a3b8',
+        'muted-teal': '#64748b',
+        'celadon': '#334155',
+        'celadon-2': '#1e293b',
+        'tea-green-2': '#ecfdf5',
 
         // Dynamic theme tokens that automatically adjust with light/dark theme
         brand: {

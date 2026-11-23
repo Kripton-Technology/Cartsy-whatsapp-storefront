@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect } from 'react';
 
-type Theme = 'light' | 'dark';
+type Theme = 'light';
 
 interface ThemeContextType {
   theme: Theme;
@@ -10,51 +10,21 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem('color-scheme');
-    if (saved === 'light' || saved === 'dark') return saved;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  });
-
   useEffect(() => {
     const root = document.documentElement;
+    root.classList.remove('dark');
+    root.classList.add('light');
+    localStorage.setItem('color-scheme', 'light');
     const metaTheme = document.querySelector('meta[name="color-scheme"]');
-
-    if (theme === 'light') {
-      root.classList.add('light');
-      root.classList.remove('dark');
-      if (metaTheme) metaTheme.setAttribute('content', 'light');
-    } else {
-      root.classList.remove('light');
-      root.classList.add('dark');
-      if (metaTheme) metaTheme.setAttribute('content', 'dark');
-    }
-
-    localStorage.setItem('color-scheme', theme);
-  }, [theme]);
-
-  // Listen for system theme changes if user hasn't set custom theme override
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    
-    const handleChange = (e: MediaQueryListEvent) => {
-      const saved = localStorage.getItem('color-scheme');
-      // Only auto-switch if user hasn't explicitly set a preference
-      if (!saved) {
-        setTheme(e.matches ? 'dark' : 'light');
-      }
-    };
-
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
+    if (metaTheme) metaTheme.setAttribute('content', 'light');
   }, []);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+    // Pure light theme permanently locked
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme: 'light', toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

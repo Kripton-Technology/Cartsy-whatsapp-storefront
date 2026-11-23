@@ -80,6 +80,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const store = activeStoreId ? (stores.find(s => s.id === activeStoreId) ?? null) : (stores[0] ?? null);
 
+  // Sync store custom accent color to CSS variables for dynamic store theming
+  useEffect(() => {
+    const themeColor = store?.delivery_settings?.theme_color || '#059669';
+    const hex = themeColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16) || 5;
+    const g = parseInt(hex.substring(2, 4), 16) || 150;
+    const b = parseInt(hex.substring(4, 6), 16) || 105;
+    document.documentElement.style.setProperty('--store-accent', themeColor);
+    document.documentElement.style.setProperty('--store-accent-rgb', `${r} ${g} ${b}`);
+  }, [store?.id, store?.delivery_settings?.theme_color]);
+
   const isTrialActive = store?.trial_ends_at ? new Date(store.trial_ends_at) > new Date() : false;
   const isOnHold = store?.on_hold === true;
   const isPaymentDueOrCanceled = ['past_due', 'unpaid', 'canceled'].includes(store?.subscription_status || '');

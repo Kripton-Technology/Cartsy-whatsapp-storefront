@@ -170,9 +170,10 @@ export function SuperAdminSettings() {
           <div className={`rounded-2xl p-5 border transition-all ${isLive ? 'bg-emerald-500/8 border-emerald-500/25' : 'bg-amber-500/8 border-amber-500/25'}`}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="font-black text-white text-base">
-                  {isLive ? '🟢 LIVE Production Mode' : '🟡 TEST Sandbox Mode'}
-                </p>
+                <div className="flex items-center gap-2 font-black text-white text-base">
+                  <span className={`w-2.5 h-2.5 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                  <span>{isLive ? 'LIVE Production Mode' : 'TEST Sandbox Mode'}</span>
+                </div>
                 <p className="text-xs text-white/40 mt-0.5">
                   {isLive
                     ? 'Customers are charged real money via Live Paystack API keys.'

@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ShoppingBag, MapPin, ExternalLink, Search, Zap, Shield, ChevronRight, Star, TrendingUp, Store, Sparkles } from 'lucide-react';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { publicApi } from '../lib/api';
 import type { BusinessInfo } from '../lib/types';
 
@@ -105,12 +104,11 @@ export function StoreDirectory() {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <ThemeToggle />
             <Link
               to="/admin/login"
-              className="group flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-steel/10 hover:bg-brand-steel/20 border border-brand-steel/15 hover:border-brand-steel/25 text-sm font-semibold transition-all duration-200 backdrop-blur-sm text-brand-header"
+              className="group flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold transition-all duration-200 shadow-sm"
             >
-              <Store className="w-4 h-4 text-brand-cream" />
+              <Store className="w-4 h-4 text-emerald-400" />
               Open Your Store
               <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </Link>

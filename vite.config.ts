@@ -10,12 +10,13 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
-        name: 'WhatsApp Commerce',
-        short_name: 'WA Commerce',
-        description: 'Manage your WhatsApp store with ease',
-        theme_color: '#2563eb',
-        background_color: '#ffffff',
+        name: 'Cartsy — Social Storefront',
+        short_name: 'Cartsy',
+        description: 'Sell through Instagram, TikTok, Snapchat & WhatsApp with instant order backups',
+        theme_color: '#ffffff',
+        background_color: '#f8fafc',
         display: 'standalone',
+        start_url: '/admin',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -36,7 +37,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8787',
+        target: 'http://127.0.0.1:8787',
         changeOrigin: true,
         secure: false,
         configure: (proxy, _options) => {

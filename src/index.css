@@ -2,95 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
-:root, html.dark {
-  /* ── User Defined Custom CSS Palette ── */
-  --tea-green: #c5efcb;
-  --dusty-olive: #647a67;
-  --black: #020402;
-  --carbon-black: #1f241f;
-  --charcoal-brown: #3c433b;
-  --dusty-olive-2: #758173;
-  --muted-teal: #8fa38a;
-  --celadon: #a9c5a0;
-  --celadon-2: #b8d2b3;
-  --tea-green-2: #c6dec6;
+:root, html, html.light, html.dark {
+  /* ── User Defined Custom CSS Palette (Light Mode Modern - Images 1, 2, 3) ── */
+  --tea-green: #059669;
+  --dusty-olive: #64748b;
+  --black: #0f172a;
+  --carbon-black: #ffffff;
+  --charcoal-brown: #e2e8f0;
+  --dusty-olive-2: #94a3b8;
+  --muted-teal: #64748b;
+  --celadon: #334155;
+  --celadon-2: #1e293b;
+  --tea-green-2: #ecfdf5;
 
-  /* ── Dark Theme (Dokani Dashboard Aesthetic) ── */
+  /* ── Light Theme (Clean White & Soft Slate SaaS Aesthetic) ── */
   /* RGB values for Tailwind opacity syntax (e.g. bg-brand-dark/95) */
-  --color-brand-dark-rgb: 2 4 2;              /* #020402 deep black canvas */
-  --color-brand-card-rgb: 31 36 31;           /* #1f241f solid matte carbon-black card surface */
-  --color-brand-steel-rgb: 60 67 59;          /* #3c433b charcoal-brown borders and dividers */
-  --color-brand-slate-rgb: 143 163 138;       /* #8fa38a muted-teal secondary & helper text */
-  --color-brand-gray-rgb: 184 210 179;        /* #b8d2b3 celadon-2 body text */
-  --color-brand-bronze-rgb: 100 122 103;      /* #647a67 dusty-olive secondary accents */
-  --color-brand-cream-rgb: 197 239 203;       /* #c5efcb tea-green primary accent */
-  --color-text-header-rgb: 255 255 255;       /* #ffffff crisp white headers */
+  --color-brand-dark-rgb: 248 250 252;        /* #f8fafc ultra-clean soft canvas */
+  --color-brand-card-rgb: 255 255 255;        /* #ffffff pure crisp white card surface */
+  --color-brand-steel-rgb: 226 232 240;       /* #e2e8f0 crisp light slate borders */
+  --color-brand-slate-rgb: 100 116 139;       /* #64748b muted secondary text */
+  --color-brand-gray-rgb: 51 65 85;           /* #334155 charcoal body text */
+  --color-brand-bronze-rgb: 148 163 184;      /* #94a3b8 subtle secondary accents */
+  --color-brand-cream-rgb: var(--store-accent-rgb, 16 185 129); /* Store custom accent (default emerald) */
+  --color-text-header-rgb: 15 23 42;          /* #0f172a deep slate headers */
 
   /* Direct CSS values for non-tailwind components */
-  --color-brand-dark: #020402;
-  --color-brand-card: #1f241f;
-  --color-brand-steel: #3c433b;
-  --color-brand-slate: #8fa38a;
-  --color-brand-gray: #b8d2b3;
-  --color-brand-bronze: #647a67;
-  --color-brand-cream: #c5efcb;
-  --color-text-header: #ffffff;
-
-  /* Dokani Solid Surface tokens (replacing translucent blurry glass) */
-  --glass-bg: #1f241f;
-  --glass-bg-hover: #262c26;
-  --glass-border: #3c433b;
-  --glass-border-glow: #c5efcb;
-
-  --scrollbar-track: #020402;
-  --scrollbar-thumb: #3c433b;
-  --scrollbar-thumb-hover: #758173;
-
-  color-scheme: dark;
-}
-
-html.light {
-  /* ── User Defined Custom CSS Palette ── */
-  --tea-green: #c5efcb;
-  --dusty-olive: #647a67;
-  --black: #020402;
-  --carbon-black: #1f241f;
-  --charcoal-brown: #3c433b;
-  --dusty-olive-2: #758173;
-  --muted-teal: #8fa38a;
-  --celadon: #a9c5a0;
-  --celadon-2: #b8d2b3;
-  --tea-green-2: #c6dec6;
-
-  /* ── Light Theme (Clean Celadon & Carbon Aesthetic) ── */
-  --color-brand-dark-rgb: 242 246 242;        /* #f2f6f2 soft celadon canvas */
-  --color-brand-card-rgb: 255 255 255;        /* #ffffff crisp white card surface */
-  --color-brand-steel-rgb: 184 210 179;       /* #b8d2b3 celadon-2 borders & outlines */
-  --color-brand-slate-rgb: 100 122 103;       /* #647a67 dusty-olive secondary text */
-  --color-brand-gray-rgb: 31 36 31;           /* #1f241f carbon-black body text */
-  --color-brand-bronze-rgb: 60 67 59;         /* #3c433b charcoal-brown */
-  --color-brand-cream-rgb: 46 91 56;          /* #2e5b38 deep rich forest olive highlight */
-  --color-text-header-rgb: 2 4 2;             /* #020402 deep black header */
-
-  --color-brand-dark: #f2f6f2;
+  --color-brand-dark: #f8fafc;
   --color-brand-card: #ffffff;
-  --color-brand-steel: #b8d2b3;
-  --color-brand-slate: #647a67;
-  --color-brand-gray: #1f241f;
-  --color-brand-bronze: #3c433b;
-  --color-brand-cream: #2e5b38;
-  --color-text-header: #020402;
+  --color-brand-steel: #e2e8f0;
+  --color-brand-slate: #64748b;
+  --color-brand-gray: #334155;
+  --color-brand-bronze: #94a3b8;
+  --color-brand-cream: var(--store-accent, #10b981);
+  --color-text-header: #0f172a;
 
+  /* Solid Surface tokens (clean white cards with soft borders) */
   --glass-bg: #ffffff;
-  --glass-bg-hover: #f5f9f5;
-  --glass-border: #b8d2b3;
-  --glass-border-glow: #647a67;
+  --glass-bg-hover: #f8fafc;
+  --glass-border: #e2e8f0;
+  --glass-border-glow: rgba(16, 185, 129, 0.2);
 
-  --scrollbar-track: #f2f6f2;
-  --scrollbar-thumb: #b8d2b3;
-  --scrollbar-thumb-hover: #758173;
+  --scrollbar-track: #f8fafc;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
 
-  color-scheme: light;
+  color-scheme: light !important;
 }
 
 body {

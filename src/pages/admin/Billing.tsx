@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../../contexts/StoreContext';
 import { adminApi } from '../../lib/api';
-import { CreditCard, CheckCircle, AlertTriangle, Calendar, Clock, Sparkles } from 'lucide-react';
+import { CreditCard, CheckCircle, AlertTriangle, Calendar, Clock, Sparkles, GraduationCap } from 'lucide-react';
 
 export function Billing() {
   const { store, refetch } = useStore();
@@ -14,11 +14,18 @@ export function Billing() {
     paystack_customer_code: string | null;
     is_active: boolean;
     days_left: number;
+    is_sponsored?: boolean;
+    sponsored_expires_at?: string | null;
+    institution_name?: string | null;
+    institution_logo?: string | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [verifyRef, setVerifyRef] = useState('');
   const [verifying, setVerifying] = useState(false);
+  const [accessCode, setAccessCode] = useState('');
+  const [claimingCode, setClaimingCode] = useState(false);
+  const [claimSuccess, setClaimSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     loadBillingStatus();
@@ -36,6 +43,26 @@ export function Billing() {
       setLoading(false);
     }
   }
+
+  const handleClaimCode = async () => {
+    if (!accessCode.trim()) return;
+    setError(null);
+    setClaimSuccess(null);
+    setClaimingCode(true);
+
+    try {
+      const res = await adminApi.claimAccessCode(accessCode.trim());
+      setClaimSuccess(`Sponsored by ${res.institution_name}! You now have 6 months free access.`);
+      setAccessCode('');
+      await loadBillingStatus();
+      await refetch();
+    } catch (err: any) {
+      console.error('[Claim Code] Error:', err);
+      setError(err.message || 'Failed to claim access code.');
+    } finally {
+      setClaimingCode(false);
+    }
+  };
 
   const loadPaystackScript = () => {
     return new Promise<boolean>((resolve) => {
@@ -141,8 +168,8 @@ export function Billing() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-brand-dark">
-        <div className="animate-spin rounded-full h-12 w-12 border-2 border-brand-steel/20 border-b-brand-cream"></div>
+      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-slate-200 border-b-emerald-600"></div>
       </div>
     );
   }
@@ -151,28 +178,70 @@ export function Billing() {
   const isTrial = status?.subscription_status === 'trialing';
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto">
+    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6">
       <div className="mb-8">
-        <h1 className="text-3xl font-extrabold text-brand-header tracking-tight font-display">Billing & Plan</h1>
-        <p className="text-brand-slate mt-2">Manage your premium SaaS store subscription</p>
+        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight font-display">Billing & Plan</h1>
+        <p className="text-slate-500 mt-2">Manage your premium SaaS store subscription</p>
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3 text-red-200">
-          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-400" />
+        <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-700">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-rose-500" />
           <div>
-            <h4 className="font-bold text-brand-header">Action Required</h4>
+            <h4 className="font-bold text-slate-900">Action Required</h4>
             <p className="text-sm mt-0.5">{error}</p>
           </div>
         </div>
       )}
 
       {info && (
-        <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-start gap-3 text-emerald-200">
-          <CheckCircle className="w-5 h-5 shrink-0 mt-0.5 text-emerald-400" />
+        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3 text-emerald-800">
+          <CheckCircle className="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" />
           <div>
-            <h4 className="font-bold text-brand-header">Payment Redirected</h4>
+            <h4 className="font-bold text-slate-900">Payment Redirected</h4>
             <p className="text-sm mt-0.5">{info}</p>
+          </div>
+        </div>
+      )}
+
+      {claimSuccess && (
+        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3 text-emerald-800">
+          <GraduationCap className="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" />
+          <div>
+            <h4 className="font-bold text-slate-900">Institution Sponsorship Activated</h4>
+            <p className="text-sm mt-0.5">{claimSuccess}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Sponsored Banner if active */}
+      {status?.is_sponsored && (
+        <div className="mb-8 p-6 bg-emerald-50/70 border border-emerald-200 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white border border-emerald-200 flex items-center justify-center shrink-0 shadow-xs">
+              <GraduationCap className="w-6 h-6 text-emerald-700" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  Sponsored Program
+                </span>
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">
+                Powered by {status.institution_name || 'Partner Institution'}
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Full 6-month graduate sponsorship. No payment required during sponsorship.
+              </p>
+            </div>
+          </div>
+          <div className="sm:text-right">
+            <span className="text-2xl font-black text-slate-900 font-display">
+              {status.days_left} days left
+            </span>
+            <p className="text-xs text-slate-500">
+              Expires {status.sponsored_expires_at ? new Date(status.sponsored_expires_at).toLocaleDateString() : 'soon'}
+            </p>
           </div>
         </div>
       )}
@@ -181,22 +250,22 @@ export function Billing() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Plan Details Card */}
-        <div className="md:col-span-2 bg-brand-steel/10 rounded-3xl border border-brand-steel/15 p-6 md:p-8 backdrop-blur-md flex flex-col justify-between">
+        <div className="md:col-span-2 bg-white rounded-2xl border border-slate-200/80 p-6 md:p-8 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex justify-between items-start mb-6">
               <div>
-                <span className="px-3 py-1 text-xs font-bold bg-brand-cream/10 text-brand-cream border border-brand-cream/20 rounded-full uppercase tracking-wider">
+                <span className="px-3 py-1 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full uppercase tracking-wider">
                   {isTrial ? 'Trial Version' : 'Professional Plan'}
                 </span>
-                <h2 className="text-2xl font-bold text-brand-header mt-3">WhatsApp Premium Merchant</h2>
+                <h2 className="text-2xl font-bold text-slate-900 mt-3 font-display">WhatsApp Premium Merchant</h2>
               </div>
               <div className="text-right">
-                <span className="text-3xl font-extrabold text-brand-cream font-display">GHS 200</span>
-                <span className="text-brand-slate text-sm"> / month</span>
+                <span className="text-3xl font-black text-slate-900 font-display">GHS 200</span>
+                <span className="text-slate-500 text-sm"> / month</span>
               </div>
             </div>
 
-            <p className="text-brand-slate mb-8 leading-relaxed">
+            <p className="text-slate-500 mb-8 leading-relaxed text-sm">
               Unlock unlimited products, automated WhatsApp catalog sync, direct checkout routing, and customized layout styling.
             </p>
 
@@ -208,8 +277,8 @@ export function Billing() {
                 'Advanced customer checkout flows',
                 'Secure payment routing via Paystack',
               ].map((feat, i) => (
-                <div key={i} className="flex items-center gap-3 text-sm text-brand-gray">
-                  <CheckCircle className="w-4 h-4 text-brand-cream shrink-0" />
+                <div key={i} className="flex items-center gap-3 text-sm text-slate-700">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>{feat}</span>
                 </div>
               ))}
@@ -218,12 +287,12 @@ export function Billing() {
 
           <div>
             {status?.subscription_status === 'active' ? (
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-emerald-300">
-                <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-emerald-800">
+                <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
                   <p className="font-semibold text-sm">Your subscription is active and in good standing.</p>
                   {status.paystack_subscription_code && (
-                    <p className="text-xs text-emerald-400/70 mt-0.5">Code: {status.paystack_subscription_code}</p>
+                    <p className="text-xs text-emerald-600 mt-0.5">Code: {status.paystack_subscription_code}</p>
                   )}
                 </div>
               </div>
@@ -231,11 +300,11 @@ export function Billing() {
               <button
                 onClick={handleSubscribe}
                 disabled={submitting}
-                className="w-full py-4 bg-gradient-to-r from-brand-cream to-brand-cream/90 hover:from-brand-cream/95 hover:to-brand-cream text-brand-dark font-extrabold rounded-2xl transition duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-cream/10"
+                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl transition duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
               >
                 {submitting ? (
                   <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-brand-dark border-t-transparent"></div>
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
                     <span>Initializing Security Gateway...</span>
                   </>
                 ) : (
@@ -250,47 +319,57 @@ export function Billing() {
         </div>
 
         {/* Subscription Status Details */}
-        <div className="bg-brand-steel/10 rounded-3xl border border-brand-steel/15 p-6 backdrop-blur-md flex flex-col justify-between">
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between">
           <div>
-            <h3 className="text-lg font-bold text-brand-header mb-6">Status Overview</h3>
+            <h3 className="text-lg font-bold text-slate-900 mb-6 font-display">Status Overview</h3>
 
             <div className="space-y-6">
               {/* Account Status Detail */}
               <div>
-                <span className="text-xs text-brand-slate block font-semibold uppercase tracking-wider">Account Status</span>
+                <span className="text-xs text-slate-500 block font-semibold uppercase tracking-wider">Account Status</span>
                 <div className="flex items-center gap-2 mt-2">
                   <span className={`w-2.5 h-2.5 rounded-full ${status?.is_active ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                  <span className="font-bold text-brand-header capitalize">
-                    {status?.subscription_status === 'trialing' ? 'Free Trial' : status?.subscription_status || 'Inactive'}
+                  <span className="font-bold text-slate-900 capitalize">
+                    {status?.is_sponsored
+                      ? 'Sponsored'
+                      : status?.subscription_status === 'trialing'
+                      ? 'Free Trial'
+                      : status?.subscription_status || 'Inactive'}
                   </span>
                 </div>
               </div>
 
               {/* Time Remaining */}
-              {status?.trial_ends_at && (
+              {(status?.is_sponsored ? status?.sponsored_expires_at : status?.trial_ends_at) && (
                 <div>
-                  <span className="text-xs text-brand-slate block font-semibold uppercase tracking-wider">
-                    {isExpired ? 'Trial Expired' : 'Trial Period Remaining'}
+                  <span className="text-xs text-slate-500 block font-semibold uppercase tracking-wider">
+                    {status?.is_sponsored
+                      ? 'Sponsorship Remaining'
+                      : isExpired
+                      ? 'Trial Expired'
+                      : 'Trial Period Remaining'}
                   </span>
                   <div className="flex items-center gap-2.5 mt-2">
-                    <Clock className={`w-5 h-5 ${isExpired ? 'text-red-400' : 'text-brand-cream'}`} />
-                    <span className="font-extrabold text-brand-header text-lg font-display">
-                      {status.days_left} {status.days_left === 1 ? 'day' : 'days'} left
+                    <Clock className={`w-5 h-5 ${isExpired ? 'text-rose-500' : 'text-emerald-600'}`} />
+                    <span className="font-extrabold text-slate-900 text-lg font-display">
+                      {status?.days_left} {status?.days_left === 1 ? 'day' : 'days'} left
                     </span>
                   </div>
                 </div>
               )}
 
               {/* Renewal Date */}
-              {status?.trial_ends_at && (
+              {(status?.is_sponsored ? status?.sponsored_expires_at : status?.trial_ends_at) && (
                 <div>
-                  <span className="text-xs text-brand-slate block font-semibold uppercase tracking-wider">
-                    {isExpired ? 'Ended On' : 'Trial Ends On'}
+                  <span className="text-xs text-slate-500 block font-semibold uppercase tracking-wider">
+                    {status?.is_sponsored ? 'Sponsored Until' : isExpired ? 'Ended On' : 'Trial Ends On'}
                   </span>
-                  <div className="flex items-center gap-2.5 mt-2 text-brand-gray">
-                    <Calendar className="w-5 h-5 text-brand-steel" />
+                  <div className="flex items-center gap-2.5 mt-2 text-slate-700">
+                    <Calendar className="w-5 h-5 text-slate-400" />
                     <span className="text-sm font-semibold">
-                      {new Date(status.trial_ends_at).toLocaleDateString(undefined, {
+                      {new Date(
+                        (status?.is_sponsored ? status?.sponsored_expires_at : status?.trial_ends_at) as string
+                      ).toLocaleDateString(undefined, {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric',
@@ -303,8 +382,8 @@ export function Billing() {
           </div>
 
           {isExpired && (
-            <div className="mt-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-start gap-2.5 text-amber-200">
-              <Sparkles className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2.5 text-amber-800">
+              <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs leading-normal">
                 Subscriptions are billed in local GHS currency. Make a payment today to unlock editing your products and storefront features instantly.
               </p>
@@ -314,11 +393,47 @@ export function Billing() {
 
       </div>
 
+      {/* Have an Institution Code? */}
+      {!status?.is_sponsored && (
+        <div className="mt-8 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
+          <div className="flex items-center gap-2 mb-2">
+            <GraduationCap className="w-5 h-5 text-emerald-600" />
+            <h3 className="text-lg font-bold text-slate-900 font-display">Have an Institution Access Code?</h3>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            If you graduated from a partner school or institution, enter your code below to activate 6 months of free sponsored access.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              placeholder="e.g., KNUST-2025-A1B2"
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono tracking-wider"
+            />
+            <button
+              onClick={handleClaimCode}
+              disabled={claimingCode || !accessCode.trim()}
+              className="px-6 py-2.5 bg-slate-900 text-white font-bold text-xs rounded-xl transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:bg-slate-800 shadow-xs"
+            >
+              {claimingCode ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  <span>Validating...</span>
+                </>
+              ) : (
+                'Claim Sponsorship'
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Verify Transaction Reference Fallback */}
       {status?.subscription_status !== 'active' && (
-        <div className="mt-8 bg-brand-steel/10 rounded-3xl border border-brand-steel/15 p-6 backdrop-blur-md">
-          <h3 className="text-lg font-bold text-brand-header mb-2">Already paid?</h3>
-          <p className="text-sm text-brand-slate mb-4">
+        <div className="mt-8 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
+          <h3 className="text-lg font-bold text-slate-900 mb-2 font-display">Already paid?</h3>
+          <p className="text-xs text-slate-500 mb-4">
             If you have completed your payment on Paystack but your subscription status hasn't updated, please enter your transaction reference below to verify it manually.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
@@ -327,16 +442,16 @@ export function Billing() {
               placeholder="e.g., T123456789012345"
               value={verifyRef}
               onChange={(e) => setVerifyRef(e.target.value)}
-              className="flex-1 bg-brand-dark/45 border border-brand-steel/20 rounded-2xl px-4 py-3 text-brand-header text-sm placeholder:text-brand-slate/50 focus:outline-none focus:border-brand-cream/40"
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-emerald-500"
             />
             <button
               onClick={handleVerifyReference}
               disabled={verifying || !verifyRef.trim()}
-              className="px-6 py-3 bg-brand-cream/10 border border-brand-cream/20 hover:bg-brand-cream/20 text-brand-cream font-bold rounded-2xl transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="px-6 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-800 font-bold text-xs rounded-xl transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-xs"
             >
               {verifying ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-brand-cream border-t-transparent"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-900 border-t-transparent"></div>
                   <span>Verifying...</span>
                 </>
               ) : (
