@@ -510,8 +510,8 @@ async function getAdminStore(userId: string) {
   const rows = await query<any>(
     `SELECT s.*
      FROM stores s
-     JOIN store_admins sa ON sa.store_id = s.id
-     WHERE sa.user_id = $1
+     LEFT JOIN store_admins sa ON sa.store_id = s.id
+     WHERE sa.user_id = $1 OR s.owner_id = $1
      ORDER BY s.created_at ASC
      LIMIT 1`,
     [userId]
@@ -1536,14 +1536,20 @@ app.get('/api/admin/push/vapid-public-key', async (_req, res) => {
   res.json({ publicKey: getVapidPublicKey() });
 });
 
-app.post('/api/admin/push/subscribe', async (req: AuthedRequest, res, next) => {
+app.post('/api/admin/push/subscribe', async (req: AuthedRequest, res: express.Response) => {
   try {
-    const store = await requireAdminStore(req, res);
-    if (!store) return;
+    const store = await requireAdminStore(req, res, true);
+    if (!store) {
+      if (!res.headersSent) {
+        res.status(404).json({ error: 'Store not found for this user account' });
+      }
+      return;
+    }
 
-    const { endpoint, keys } = req.body;
+    const { endpoint, keys } = req.body || {};
     if (!endpoint || !keys?.p256dh || !keys?.auth) {
-      res.status(400).json({ error: 'Invalid push subscription payload' });
+      console.warn('[PUSH SUBSCRIBE] Missing payload params:', { endpoint: !!endpoint, hasKeys: !!keys, p256dh: !!keys?.p256dh, auth: !!keys?.auth });
+      res.status(400).json({ error: 'Invalid push subscription payload: missing endpoint or encryption keys' });
       return;
     }
 
@@ -1552,12 +1558,14 @@ app.post('/api/admin/push/subscribe', async (req: AuthedRequest, res, next) => {
        VALUES ($1, $2, $3, $4, now())
        ON CONFLICT (endpoint)
        DO UPDATE SET store_id = $1, p256dh = $3, auth = $4, last_success_at = now()`,
-      [store.id, endpoint, keys.p256dh, keys.auth]
+      [store.id, String(endpoint).trim(), String(keys.p256dh).trim(), String(keys.auth).trim()]
     );
 
+    console.log(`[PUSH SUBSCRIBE] Registered push endpoint for store: ${store.business_name} (${store.id})`);
     res.json({ success: true });
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    console.error('[PUSH SUBSCRIBE ERROR]', error);
+    res.status(500).json({ error: error?.message || 'Database error while saving push subscription' });
   }
 });
 

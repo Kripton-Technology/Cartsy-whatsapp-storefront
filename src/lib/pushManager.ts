@@ -11,6 +11,16 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+function arrayBufferToBase64Url(buffer: ArrayBuffer | null): string {
+  if (!buffer) return '';
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 export function isIOS(): boolean {
   if (typeof window === 'undefined') return false;
   return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -60,19 +70,43 @@ export async function enablePushNotifications(): Promise<{ success: boolean; mes
 
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
+
+    // If an existing subscription exists, verify its keys. If missing or invalid, unsubscribe to create fresh.
+    let p256dh = '';
+    let auth = '';
+
+    if (sub) {
+      const subJson = sub.toJSON();
+      p256dh = subJson.keys?.p256dh || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('p256dh')) : '');
+      auth = subJson.keys?.auth || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('auth')) : '');
+
+      if (!p256dh || !auth) {
+        try {
+          await sub.unsubscribe();
+        } catch (_) {}
+        sub = null;
+      }
+    }
+
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey),
       });
+      const subJson = sub.toJSON();
+      p256dh = subJson.keys?.p256dh || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('p256dh')) : '');
+      auth = subJson.keys?.auth || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('auth')) : '');
     }
 
-    const subJson = sub.toJSON();
+    if (!sub.endpoint || !p256dh || !auth) {
+      return { success: false, message: 'Browser generated an incomplete push subscription. Please try again.' };
+    }
+
     await adminApi.subscribePush({
       endpoint: sub.endpoint,
       keys: {
-        p256dh: subJson.keys?.p256dh,
-        auth: subJson.keys?.auth,
+        p256dh,
+        auth,
       },
     });
 
