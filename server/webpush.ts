@@ -160,7 +160,7 @@ export async function sendWebPush(
     const res = await fetch(subscription.endpoint, {
       method: 'POST',
       headers,
-      body: ciphertext,
+      body: new Uint8Array(ciphertext) as any,
     });
 
     if (res.status === 201 || res.status === 200) {
