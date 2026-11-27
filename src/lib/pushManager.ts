@@ -124,6 +124,22 @@ export async function enablePushNotifications(): Promise<{ success: boolean; mes
       return { success: false, message: '[DIAG-STEP3] reg.pushManager is undefined — PushManager not available on this SW.' };
     }
 
+    // iOS Fix: ensure the SW is actually controlling this page before subscribing.
+    // On first PWA open, the SW may be registered+active but not yet "controller".
+    // webpushd (Apple's push daemon) requires the SW to be in control — if not, it
+    // throws AbortError code 20. We wait up to 3 seconds for controller to appear.
+    if (!navigator.serviceWorker.controller) {
+      console.log('[PUSH DIAG] SW not yet controlling page — waiting for controller...');
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 3000);
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          clearTimeout(timeout);
+          resolve();
+        }, { once: true });
+      });
+      console.log('[PUSH DIAG] Controller after wait:', !!navigator.serviceWorker.controller);
+    }
+
     // STEP 4: Check for existing subscription
     let sub: PushSubscription | null = null;
     try {

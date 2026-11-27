@@ -13,6 +13,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
+        id: '/cartsy-storefront/',
         name: 'Cartsy — Social Storefront',
         short_name: 'Cartsy',
         description: 'Sell through Instagram, TikTok, Snapchat & WhatsApp with instant order backups',
@@ -29,7 +30,8 @@ export default defineConfig({
           {
             src: 'pwa-512x512.png',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       }

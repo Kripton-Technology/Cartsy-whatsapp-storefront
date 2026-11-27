@@ -3,6 +3,17 @@ import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 
 declare let self: ServiceWorkerGlobalScope;
 
+// ── iOS Fix: immediately activate and claim all clients ──────────────────────
+// Without this, iOS WebKit's webpushd throws AbortError (code 20) because the
+// service worker is registered but not yet controlling the page on first load.
+self.addEventListener('install', (event: any) => {
+  event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener('activate', (event: any) => {
+  event.waitUntil(self.clients.claim());
+});
+
 // Precache static assets built by Vite
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST || []);
