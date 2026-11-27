@@ -11,6 +11,15 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+function getSafeApplicationServerKey(base64String: string): BufferSource {
+  const bytes = urlBase64ToUint8Array(base64String);
+  // WebKit on iOS strictly requires an exact, non-offset ArrayBuffer backing
+  if (bytes.buffer) {
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  }
+  return bytes as unknown as BufferSource;
+}
+
 function arrayBufferToBase64Url(buffer: ArrayBuffer | null): string {
   if (!buffer) return '';
   const bytes = new Uint8Array(buffer);
@@ -57,18 +66,24 @@ export async function enablePushNotifications(): Promise<{ success: boolean; mes
     };
   }
 
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') {
-    return { success: false, message: 'Push notification permission was denied or dismissed.' };
-  }
-
   try {
+    // 1. Fetch VAPID key first so permission -> subscribe happens cleanly in sequence
     const { publicKey } = await adminApi.getPushVapidKey();
     if (!publicKey) {
       return { success: false, message: 'Push service key could not be retrieved from server.' };
     }
 
+    // 2. Request permission
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      return { success: false, message: 'Push notification permission was denied or dismissed.' };
+    }
+
     const reg = await navigator.serviceWorker.ready;
+    if (!reg.pushManager) {
+      return { success: false, message: 'Push manager is not available on this device.' };
+    }
+
     let sub = await reg.pushManager.getSubscription();
 
     // If an existing subscription exists, verify its keys. If missing or invalid, unsubscribe to create fresh.
@@ -89,16 +104,30 @@ export async function enablePushNotifications(): Promise<{ success: boolean; mes
     }
 
     if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey),
-      });
+      const appKey = getSafeApplicationServerKey(publicKey);
+      try {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: appKey,
+        });
+      } catch (subErr: any) {
+        // Fallback: in case WebKit version preferred Uint8Array instead of ArrayBuffer
+        if (appKey instanceof ArrayBuffer) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: new Uint8Array(appKey) as unknown as BufferSource,
+          });
+        } else {
+          throw subErr;
+        }
+      }
+
       const subJson = sub.toJSON();
       p256dh = subJson.keys?.p256dh || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('p256dh')) : '');
       auth = subJson.keys?.auth || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('auth')) : '');
     }
 
-    if (!sub.endpoint || !p256dh || !auth) {
+    if (!sub || !sub.endpoint || !p256dh || !auth) {
       return { success: false, message: 'Browser generated an incomplete push subscription. Please try again.' };
     }
 
