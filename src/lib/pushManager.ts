@@ -1,8 +1,9 @@
 import { adminApi } from './api';
 
 function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const cleaned = base64String.trim().replace(/^["']|["']$/g, '');
+  const padding = '='.repeat((4 - (cleaned.length % 4)) % 4);
+  const base64 = (cleaned + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -140,38 +141,32 @@ export async function enablePushNotifications(): Promise<{ success: boolean; mes
       console.log('[PUSH DIAG] Controller after wait:', !!navigator.serviceWorker.controller);
     }
 
-    // STEP 4: Check for existing subscription
-    let sub: PushSubscription | null = null;
+    // STEP 4: Force-clear any existing subscription to prevent iOS Push Token Session glitch
     try {
-      sub = await reg.pushManager.getSubscription();
-      console.log('[PUSH DIAG] Existing subscription:', sub ? sub.endpoint.slice(0, 60) : 'none');
-    } catch (getSubErr: any) {
-      console.warn('[PUSH DIAG] getSubscription() threw (non-fatal):', getSubErr?.message);
+      const existingSub = await reg.pushManager.getSubscription();
+      if (existingSub) {
+        console.log('[PUSH DIAG] Unsubscribing existing subscription:', existingSub.endpoint.slice(0, 60));
+        await existingSub.unsubscribe();
+      }
+    } catch (unsubErr: any) {
+      console.warn('[PUSH DIAG] Existing subscription cleanup warning:', unsubErr?.message);
     }
 
+    let sub: PushSubscription | null = null;
     let p256dh = '';
     let auth = '';
 
-    if (sub) {
-      const subJson = sub.toJSON();
-      p256dh = subJson.keys?.p256dh || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('p256dh')) : '');
-      auth = subJson.keys?.auth || (sub.getKey ? arrayBufferToBase64Url(sub.getKey('auth')) : '');
-      console.log('[PUSH DIAG] Existing sub keys — p256dh.length:', p256dh.length, 'auth.length:', auth.length);
-
-      if (!p256dh || !auth) {
-        console.log('[PUSH DIAG] Stale sub missing keys — unsubscribing...');
-        try { await sub.unsubscribe(); } catch (_) {}
-        sub = null;
-      }
-    }
-
     // STEP 5: Create new subscription
-    if (!sub) {
+    {
       let appKey: BufferSource;
+      let keyBytesLen = 0;
+      let keyFirstByte = 0;
       try {
         appKey = getSafeApplicationServerKey(publicKey);
-        const keyBytes = appKey instanceof ArrayBuffer ? new Uint8Array(appKey) : appKey as Uint8Array;
-        console.log('[PUSH DIAG] applicationServerKey bytes:', keyBytes.length, '| first byte:', keyBytes[0]);
+        const keyBytes = appKey instanceof ArrayBuffer ? new Uint8Array(appKey) : (appKey as Uint8Array);
+        keyBytesLen = keyBytes.length;
+        keyFirstByte = keyBytes[0] ?? 0;
+        console.log('[PUSH DIAG] applicationServerKey bytes:', keyBytesLen, '| first byte:', keyFirstByte);
       } catch (keyErr: any) {
         const msg = `[DIAG-STEP5-KEY] Failed to decode VAPID key: ${keyErr?.message || String(keyErr)}`;
         console.error(msg);
@@ -203,7 +198,7 @@ export async function enablePushNotifications(): Promise<{ success: boolean; mes
 
         if (subscribeError) {
           const e = subscribeError;
-          const msg = `[DIAG-STEP5-SUB] pushManager.subscribe() failed — name="${e?.name}" message="${e?.message}" code="${e?.code}"`;
+          const msg = `[DIAG-STEP5-SUB] pushManager.subscribe() failed — name="${e?.name}" message="${e?.message}" code="${e?.code}" (keyLen=${keyBytesLen}, firstByte=${keyFirstByte})`;
           console.error(msg);
           return { success: false, message: msg };
         }

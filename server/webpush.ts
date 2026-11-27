@@ -29,8 +29,8 @@ export function getVapidKeys() {
   if (vapidKeys) return vapidKeys;
 
   vapidKeys = {
-    publicKey: process.env.VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC_KEY,
-    privateKey: process.env.VAPID_PRIVATE_KEY || DEFAULT_VAPID_PRIVATE_KEY,
+    publicKey: (process.env.VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC_KEY).trim().replace(/^["']|["']$/g, ''),
+    privateKey: (process.env.VAPID_PRIVATE_KEY || DEFAULT_VAPID_PRIVATE_KEY).trim().replace(/^["']|["']$/g, ''),
   };
   return vapidKeys;
 }
