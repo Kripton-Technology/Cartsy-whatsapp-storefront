@@ -2904,6 +2904,382 @@ app.patch('/api/superadmin/access-codes/:id/revoke', requireSuperAdmin, async (r
   }
 });
 
+// POST /api/superadmin/access-codes/bulk-action — delete, revoke, or restore selected access codes
+app.post('/api/superadmin/access-codes/bulk-action', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { ids, action } = req.body as { ids?: string[]; action?: 'delete' | 'revoke' | 'restore' };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'Select at least one access code.' });
+      return;
+    }
+    if (!action || !['delete', 'revoke', 'restore'].includes(action)) {
+      res.status(400).json({ error: 'Invalid bulk action. Must be delete, revoke, or restore.' });
+      return;
+    }
+
+    if (action === 'delete') {
+      const existing = await query<{ id: string; store_id: string | null }>(
+        `SELECT id, store_id FROM graduate_access_codes WHERE id = ANY($1::uuid[])`,
+        [ids]
+      );
+      const storeIds = existing.map(r => r.store_id).filter((s): s is string => Boolean(s));
+
+      await query(`DELETE FROM graduate_access_codes WHERE id = ANY($1::uuid[])`, [ids]);
+
+      if (storeIds.length > 0) {
+        await query(
+          `UPDATE stores
+           SET is_sponsored = false,
+               subscription_status = 'unpaid',
+               updated_at = now()
+           WHERE id = ANY($1::uuid[])`,
+          [storeIds]
+        );
+      }
+
+      res.json({ success: true, action, affected: existing.length });
+      return;
+    }
+
+    if (action === 'revoke') {
+      const updated = await query<{ id: string; store_id: string | null }>(
+        `UPDATE graduate_access_codes
+         SET status = 'revoked'
+         WHERE id = ANY($1::uuid[])
+         RETURNING id, store_id`,
+        [ids]
+      );
+      const storeIds = updated.map(r => r.store_id).filter((s): s is string => Boolean(s));
+      if (storeIds.length > 0) {
+        await query(
+          `UPDATE stores
+           SET is_sponsored = false,
+               subscription_status = 'unpaid',
+               updated_at = now()
+           WHERE id = ANY($1::uuid[])`,
+          [storeIds]
+        );
+      }
+      res.json({ success: true, action, affected: updated.length });
+      return;
+    }
+
+    // restore
+    const restored = await query<{ id: string }>(
+      `UPDATE graduate_access_codes
+       SET status = 'issued'
+       WHERE id = ANY($1::uuid[]) AND status = 'revoked'
+       RETURNING id`,
+      [ids]
+    );
+    res.json({ success: true, action, affected: restored.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+function parseCsvRows(csvText: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const ch = csvText[i];
+    const next = csvText[i + 1];
+
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cell += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(cell.trim());
+        cell = '';
+      } else if (ch === '\r' && next === '\n') {
+        row.push(cell.trim());
+        if (row.some(c => c.length > 0)) rows.push(row);
+        row = [];
+        cell = '';
+        i++;
+      } else if (ch === '\n' || ch === '\r') {
+        row.push(cell.trim());
+        if (row.some(c => c.length > 0)) rows.push(row);
+        row = [];
+        cell = '';
+      } else {
+        cell += ch;
+      }
+    }
+  }
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell.trim());
+    if (row.some(c => c.length > 0)) rows.push(row);
+  }
+  return rows;
+}
+
+// POST /api/superadmin/cohorts/:id/graduates/import-gsheet — import graduates directly from a Google Sheet URL
+app.post('/api/superadmin/cohorts/:id/graduates/import-gsheet', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id: cohort_id } = req.params;
+    const { sheet_url } = req.body as { sheet_url?: string };
+
+    if (!sheet_url || typeof sheet_url !== 'string') {
+      res.status(400).json({ error: 'Please provide a Google Sheet URL.' });
+      return;
+    }
+
+    const idMatch = sheet_url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (!idMatch) {
+      res.status(400).json({ error: 'Invalid Google Sheet URL. Expected https://docs.google.com/spreadsheets/d/...' });
+      return;
+    }
+    const sheetId = idMatch[1];
+    const gidMatch = sheet_url.match(/[?&#]gid=([0-9]+)/);
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidMatch ? `&gid=${gidMatch[1]}` : ''}`;
+
+    const cohortRows = await query<any>('SELECT * FROM cohorts WHERE id = $1', [cohort_id]);
+    if (cohortRows.length === 0) {
+      res.status(404).json({ error: 'Cohort not found.' });
+      return;
+    }
+    const cohort = cohortRows[0];
+
+    const resp = await fetch(exportUrl);
+    if (!resp.ok) {
+      res.status(400).json({
+        error: 'Could not read Google Sheet. Make sure Link Sharing is set to "Anyone with the link can view".',
+      });
+      return;
+    }
+
+    const csvText = await resp.text();
+    if (csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
+      res.status(400).json({
+        error: 'Google Sheet is private. Set Share → General access → "Anyone with the link" (Viewer) and try again.',
+      });
+      return;
+    }
+
+    const rows = parseCsvRows(csvText);
+    if (rows.length === 0) {
+      res.status(400).json({ error: 'The Google Sheet is empty.' });
+      return;
+    }
+
+    // Detect header row (supports Google Forms Timestamp + Name, Phone, Email, Course)
+    const firstLower = rows[0].map(h => h.toLowerCase());
+    const hasHeader = firstLower.some(h =>
+      h.includes('name') || h.includes('phone') || h.includes('email') || h.includes('timestamp') || h.includes('course')
+    );
+
+    let nameIdx = 0;
+    let phoneIdx = 1;
+    let emailIdx = 2;
+    let courseIdx = 3;
+    let startRow = 0;
+
+    if (hasHeader) {
+      startRow = 1;
+      const findCol = (keywords: string[]) => firstLower.findIndex(h => keywords.some(k => h.includes(k)));
+      const nIdx = findCol(['name', 'full name', 'graduate']);
+      const pIdx = findCol(['phone', 'whatsapp', 'mobile', 'tel', 'number']);
+      const eIdx = findCol(['email', 'mail']);
+      const cIdx = findCol(['course', 'program', 'department', 'trade']);
+
+      if (nIdx !== -1) nameIdx = nIdx;
+      else if (firstLower[0]?.includes('timestamp')) nameIdx = 1;
+      phoneIdx = pIdx !== -1 ? pIdx : nameIdx + 1;
+      emailIdx = eIdx !== -1 ? eIdx : nameIdx + 2;
+      courseIdx = cIdx !== -1 ? cIdx : nameIdx + 3;
+    }
+
+    const existingRows = await query<{ graduate_phone: string | null; graduate_email: string | null }>(
+      `SELECT graduate_phone, graduate_email FROM graduate_access_codes WHERE cohort_id = $1`,
+      [cohort_id]
+    );
+    const existingPhones = new Set(existingRows.map(r => (r.graduate_phone || '').trim()).filter(Boolean));
+    const existingEmails = new Set(existingRows.map(r => (r.graduate_email || '').trim().toLowerCase()).filter(Boolean));
+
+    const expiresAt = cohort.graduation_date
+      ? new Date(new Date(cohort.graduation_date).getTime() + 90 * 24 * 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+
+    const prefix = cohort.access_code_prefix
+      ? `${cohort.access_code_prefix}-`
+      : `${String(cohort.year).slice(-2)}-`;
+
+    const crypto = await import('crypto');
+    let created = 0;
+    let skippedDuplicates = 0;
+    const errors: Array<{ row: number; name: string; error: string }> = [];
+
+    for (let i = startRow; i < rows.length; i++) {
+      const cols = rows[i];
+      const name = (cols[nameIdx] || '').trim();
+      const phone = (cols[phoneIdx] || '').trim() || null;
+      const email = (cols[emailIdx] || '').trim() || null;
+      const course = (cols[courseIdx] || '').trim() || null;
+
+      if (!name) continue;
+      if ((phone && existingPhones.has(phone)) || (email && existingEmails.has(email.toLowerCase()))) {
+        skippedDuplicates++;
+        continue;
+      }
+
+      const code = `${prefix}${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      try {
+        await query(
+          `INSERT INTO graduate_access_codes
+             (cohort_id, code, graduate_name, graduate_phone, graduate_email, course, expires_at, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'issued')`,
+          [cohort_id, code, name, phone, email, course, expiresAt]
+        );
+        if (phone) existingPhones.add(phone);
+        if (email) existingEmails.add(email.toLowerCase());
+        created++;
+      } catch (err: any) {
+        errors.push({ row: i + 1, name, error: err.message || 'Database error' });
+      }
+    }
+
+    res.json({
+      success: true,
+      total_submitted: Math.max(0, rows.length - startRow),
+      created,
+      skipped_duplicates: skippedDuplicates,
+      errors,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── Public Graduate Intake Form Routes ─────────────────────────────────────────
+// GET /api/public/cohorts/:id — public cohort & institution info for the shareable intake form
+app.get('/api/public/cohorts/:id', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id } = req.params;
+    const rows = await query<any>(
+      `SELECT c.id, c.name, c.year, c.graduation_date,
+              i.name AS institution_name, i.logo_url AS institution_logo
+       FROM cohorts c
+       JOIN institutions i ON i.id = c.institution_id
+       WHERE c.id = $1 AND i.active = true
+       LIMIT 1`,
+      [id]
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Cohort form not found or no longer active.' });
+      return;
+    }
+    res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/public/cohorts/:id/graduate-intake — graduate fills the shareable form and gets an access code
+app.post('/api/public/cohorts/:id/graduate-intake', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const { id: cohort_id } = req.params;
+    const { name, phone, email, course } = req.body as {
+      name?: string;
+      phone?: string;
+      email?: string;
+      course?: string;
+    };
+
+    const cleanName = (name || '').trim();
+    const cleanPhone = (phone || '').trim();
+    const cleanEmail = (email || '').trim().toLowerCase() || null;
+    const cleanCourse = (course || '').trim() || null;
+
+    if (!cleanName || !cleanPhone) {
+      res.status(400).json({ error: 'Full name and phone number are required.' });
+      return;
+    }
+
+    const cohortRows = await query<any>(
+      `SELECT c.*, i.name AS institution_name
+       FROM cohorts c
+       JOIN institutions i ON i.id = c.institution_id
+       WHERE c.id = $1 AND i.active = true
+       LIMIT 1`,
+      [cohort_id]
+    );
+    if (cohortRows.length === 0) {
+      res.status(404).json({ error: 'Cohort form not found or no longer active.' });
+      return;
+    }
+    const cohort = cohortRows[0];
+
+    // Check if this graduate already submitted for this cohort (by phone or email)
+    const existing = await query<any>(
+      `SELECT code, graduate_name, expires_at, status
+       FROM graduate_access_codes
+       WHERE cohort_id = $1
+         AND (
+           graduate_phone = $2
+           OR ($3::text IS NOT NULL AND LOWER(graduate_email) = $3::text)
+         )
+       LIMIT 1`,
+      [cohort_id, cleanPhone, cleanEmail]
+    );
+
+    if (existing.length > 0) {
+      res.json({
+        success: true,
+        already_registered: true,
+        code: existing[0].code,
+        graduate_name: existing[0].graduate_name,
+        expires_at: existing[0].expires_at,
+        cohort_name: cohort.name,
+        institution_name: cohort.institution_name,
+      });
+      return;
+    }
+
+    const expiresAt = cohort.graduation_date
+      ? new Date(new Date(cohort.graduation_date).getTime() + 90 * 24 * 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+
+    const prefix = cohort.access_code_prefix
+      ? `${cohort.access_code_prefix}-`
+      : `${String(cohort.year).slice(-2)}-`;
+
+    const crypto = await import('crypto');
+    const code = `${prefix}${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+
+    await query(
+      `INSERT INTO graduate_access_codes
+         (cohort_id, code, graduate_name, graduate_phone, graduate_email, course, expires_at, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'issued')`,
+      [cohort_id, code, cleanName, cleanPhone, cleanEmail, cleanCourse, expiresAt]
+    );
+
+    res.status(201).json({
+      success: true,
+      already_registered: false,
+      code,
+      graduate_name: cleanName,
+      expires_at: expiresAt,
+      cohort_name: cohort.name,
+      institution_name: cohort.institution_name,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/superadmin/institutions/:id/stats — institution metrics (IN-6, IN-10: privacy-first, zero customer data)
 app.get('/api/superadmin/institutions/:id/stats', requireSuperAdmin, async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {

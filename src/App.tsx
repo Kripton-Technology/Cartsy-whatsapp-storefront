@@ -19,6 +19,7 @@ import { Login } from './pages/admin/Login';
 import { AuthCallback } from './pages/AuthCallback';
 import { AuthSuccess } from './pages/AuthSuccess';
 import { OrderTracking } from './pages/OrderTracking';
+import { GraduateForm } from './pages/public/GraduateForm';
 import { Shield } from 'lucide-react';
 import { useEffect } from 'react';
 
@@ -65,6 +66,9 @@ function App() {
               {/* Buyer Order Tracking */}
               <Route path="/track" element={<OrderTracking />} />
               <Route path="/track/:orderNumber" element={<OrderTracking />} />
+
+              {/* Shareable Graduate Intake Form */}
+              <Route path="/graduate-form/:cohortId" element={<GraduateForm />} />
 
               {/* OAuth Callback Handlers */}
               <Route path="/auth/callback" element={<AuthCallback />} />
