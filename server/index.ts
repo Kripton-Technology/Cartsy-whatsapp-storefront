@@ -309,26 +309,66 @@ app.get('/api/platform-info', async (_req: express.Request, res: express.Respons
   }
 });
 
+function resolveSiteUrl(req: express.Request): string {
+  const envUrl = (process.env.SITE_URL || process.env.VITE_SITE_URL || '').trim().replace(/\/+$/, '');
+  if (envUrl) return envUrl;
+  const host = req.get('host');
+  if (host) return `${req.protocol || 'https'}://${host}`;
+  return 'https://usecartsy.me';
+}
+
+function escapeHtmlAttr(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ─── Sitemap ───────────────────────────────────────────────────────────────────
-// GET /sitemap.xml — dynamically lists all live stores so search engines can index them.
-app.get('/sitemap.xml', async (_req: express.Request, res: express.Response, next: express.NextFunction) => {
+// GET /sitemap.xml — dynamically lists all live stores and their products so search engines can index them.
+app.get('/sitemap.xml', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
-    const siteUrl = process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://YOURDOMAIN.com';
-    const stores = await query<{ slug: string; updated_at: string }>(
-      `SELECT slug, updated_at FROM stores
+    const siteUrl = resolveSiteUrl(req);
+    const stores = await query<{ id: string; slug: string; updated_at: string }>(
+      `SELECT id, slug, updated_at FROM stores
        WHERE active = true
          AND on_hold = false
          AND (
            subscription_status = 'active'
            OR (subscription_status = 'trialing' AND trial_ends_at > now())
+           OR is_sponsored = true
          )
        ORDER BY updated_at DESC`
     );
 
+    const storeIds = stores.map(s => s.id);
+    const products = storeIds.length > 0
+      ? await query<{ id: string; store_id: string; updated_at: string }>(
+          `SELECT id, store_id, updated_at FROM products
+           WHERE store_id = ANY($1) AND in_stock = true
+           ORDER BY updated_at DESC
+           LIMIT 5000`,
+          [storeIds]
+        )
+      : [];
+
+    const slugByStoreId = new Map(stores.map(s => [s.id, s.slug]));
+
     const storeUrls = stores.map(s => {
       const lastmod = s.updated_at ? new Date(s.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-      return `  <url>\n    <loc>${siteUrl}/store/${s.slug}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+      return `  <url>\n    <loc>${siteUrl}/s/${encodeURIComponent(s.slug)}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
     }).join('\n');
+
+    const productUrls = products
+      .map(p => {
+        const slug = slugByStoreId.get(p.store_id);
+        if (!slug) return '';
+        const lastmod = p.updated_at ? new Date(p.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+        return `  <url>\n    <loc>${siteUrl}/s/${encodeURIComponent(slug)}/p/${encodeURIComponent(p.id)}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>\n  </url>`;
+      })
+      .filter(Boolean)
+      .join('\n');
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -338,6 +378,7 @@ app.get('/sitemap.xml', async (_req: express.Request, res: express.Response, nex
     <priority>1.0</priority>
   </url>
 ${storeUrls}
+${productUrls}
 </urlset>`;
 
     res.setHeader('Content-Type', 'application/xml');
@@ -350,9 +391,9 @@ ${storeUrls}
 
 // ─── Robots.txt ────────────────────────────────────────────────────────────────
 // GET /robots.txt — Served dynamically so SITE_URL can be injected into the Sitemap line.
-app.get('/robots.txt', (_req: express.Request, res: express.Response) => {
-  const siteUrl = process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://YOURDOMAIN.com';
-  const content = `User-agent: *\nAllow: /\nAllow: /store/\nDisallow: /admin\nDisallow: /admin/\nDisallow: /superadmin\nDisallow: /superadmin/\nSitemap: ${siteUrl}/sitemap.xml\n`;
+app.get('/robots.txt', (req: express.Request, res: express.Response) => {
+  const siteUrl = resolveSiteUrl(req);
+  const content = `User-agent: *\nAllow: /\nAllow: /s/\nAllow: /store/\nDisallow: /admin\nDisallow: /admin/\nDisallow: /superadmin\nDisallow: /superadmin/\nSitemap: ${siteUrl}/sitemap.xml\n`;
   res.setHeader('Content-Type', 'text/plain');
   res.setHeader('Cache-Control', 'public, max-age=86400'); // cache for 1 day
   res.send(content);
@@ -360,24 +401,24 @@ app.get('/robots.txt', (_req: express.Request, res: express.Response) => {
 
 // ─── SEO Meta Injection helper ─────────────────────────────────────────────────
 // Injects dynamic <title>, <meta>, Open Graph, and JSON-LD tags into index.html
-// for /store/:slug routes so search engines index each store page individually.
+// for /s/:slug and /store/:slug routes so search engines index each store page individually.
 function buildStoreMeta(store: Record<string, any>, siteUrl: string): string {
-  const name = store.business_name || 'WhatsApp Store';
-  const slug = store.slug || '';
-  const tagline = store.tagline || `Shop at ${name} — browse products and order via WhatsApp.`;
-  const description = tagline.length > 155 ? tagline.slice(0, 152) + '...' : tagline;
-  const image = store.logo_url || store.hero_banner_url || `${siteUrl}/pwa-512x512.png`;
-  const url = `${siteUrl}/store/${slug}`;
+  const name = escapeHtmlAttr(store.business_name || 'WhatsApp Store');
+  const slug = encodeURIComponent(store.slug || '');
+  const rawTagline = store.tagline || `Shop at ${store.business_name || 'WhatsApp Store'} — browse products and order via WhatsApp.`;
+  const description = escapeHtmlAttr(rawTagline.length > 155 ? rawTagline.slice(0, 152) + '...' : rawTagline);
+  const image = escapeHtmlAttr(store.logo_url || store.hero_banner_url || `${siteUrl}/pwa-512x512.png`);
+  const url = `${siteUrl}/s/${slug}`;
   const whatsapp = store.whatsapp_number || '';
   const location = store.location || '';
 
   const jsonLd = JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'OnlineStore',
-    name,
-    description: tagline,
+    name: store.business_name || 'WhatsApp Store',
+    description: rawTagline,
     url,
-    image,
+    image: store.logo_url || store.hero_banner_url || `${siteUrl}/pwa-512x512.png`,
     ...(whatsapp && {
       contactPoint: {
         '@type': 'ContactPoint',
@@ -415,13 +456,29 @@ function buildStoreMeta(store: Record<string, any>, siteUrl: string): string {
 }
 
 function buildProductMeta(store: Record<string, any>, product: Record<string, any>, siteUrl: string): string {
-  const storeName = store.business_name || 'Cartsy Store';
-  const name = product.name || 'Product';
-  const slug = store.slug || '';
+  const storeName = escapeHtmlAttr(store.business_name || 'Cartsy Store');
+  const name = escapeHtmlAttr(product.name || 'Product');
+  const slug = encodeURIComponent(store.slug || '');
   const price = Number(product.price || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const description = product.description || `Buy ${name} for GHS ${price} from ${storeName} on WhatsApp.`;
-  const image = (product.image_urls && product.image_urls[0]) || product.image_url || store.logo_url || `${siteUrl}/pwa-512x512.png`;
-  const url = `${siteUrl}/s/${slug}/p/${product.id}`;
+  const rawDesc = product.description || `Buy ${product.name || 'Product'} for GHS ${price} from ${store.business_name || 'Cartsy Store'} on WhatsApp.`;
+  const description = escapeHtmlAttr(rawDesc.length > 155 ? rawDesc.slice(0, 152) + '...' : rawDesc);
+  const image = escapeHtmlAttr((product.image_urls && product.image_urls[0]) || product.image_url || store.logo_url || `${siteUrl}/pwa-512x512.png`);
+  const url = `${siteUrl}/s/${slug}/p/${encodeURIComponent(product.id)}`;
+
+  const jsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name || 'Product',
+    description: rawDesc,
+    image: (product.image_urls && product.image_urls[0]) || product.image_url || store.logo_url || `${siteUrl}/pwa-512x512.png`,
+    offers: {
+      '@type': 'Offer',
+      priceCurrency: 'GHS',
+      price: Number(product.price || 0).toFixed(2),
+      availability: product.in_stock === false ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock',
+      url,
+    },
+  });
 
   return `
     <!-- Product SEO: injected by server for ${name} -->
@@ -435,59 +492,86 @@ function buildProductMeta(store: Record<string, any>, product: Record<string, an
     <meta property="og:description" content="${description}" />
     <meta property="og:image" content="${image}" />
     <meta property="og:url" content="${url}" />
-    <meta property="product:price:amount" content="${price}" />
+    <meta property="product:price:amount" content="${Number(product.price || 0).toFixed(2)}" />
     <meta property="product:price:currency" content="GHS" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${name} | GHS ${price} — ${storeName}" />
     <meta name="twitter:description" content="${description}" />
     <meta name="twitter:image" content="${image}" />
+    <script type="application/ld+json">${jsonLd}</script>
     <!-- End Product SEO -->`;
 }
+
+let cachedIndexHtml: string | null = null;
+async function loadBaseHtml(req: express.Request): Promise<string | null> {
+  if (cachedIndexHtml) return cachedIndexHtml;
+  const fs = await import('node:fs/promises');
+  const distIndexPath = path.resolve(process.cwd(), 'dist', 'index.html');
+  try {
+    cachedIndexHtml = await fs.readFile(distIndexPath, 'utf-8');
+    return cachedIndexHtml;
+  } catch {
+    // On Vercel serverless, dist/index.html is served by CDN rather than local disk
+    const host = req.get('host');
+    if (!host) return null;
+    try {
+      const origin = `${req.protocol || 'https'}://${host}`;
+      const resp = await fetch(`${origin}/index.html`);
+      if (resp.ok) {
+        cachedIndexHtml = await resp.text();
+        return cachedIndexHtml;
+      }
+    } catch (err) {
+      console.error('[SEO] Failed to fetch base index.html:', err);
+    }
+    return null;
+  }
+}
+
+// Dynamic SEO meta injection for /s/:slug and /store/:slug (runs on both Vercel and Node prod)
+app.get(['/s/:slug', '/s/:slug/p/:productId', '/store/:slug', '/store/:slug/p/:productId'], async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    return next();
+  }
+  const { slug, productId } = req.params;
+  try {
+    let html = await loadBaseHtml(req);
+    if (!html) return next();
+
+    const siteUrl = resolveSiteUrl(req);
+    const stores = await query<any>('SELECT * FROM stores WHERE slug = $1 AND active = true LIMIT 1', [slug]);
+    if (stores.length > 0) {
+      let injectedMeta = buildStoreMeta(stores[0], siteUrl);
+      if (productId) {
+        const products = await query<any>('SELECT * FROM products WHERE id = $1 AND store_id = $2 LIMIT 1', [productId, stores[0].id]);
+        if (products.length > 0) {
+          injectedMeta = buildProductMeta(stores[0], products[0], siteUrl);
+        }
+      }
+      html = html.replace(
+        /<!-- SEO: base\/fallback meta tags[^]*?<!-- End SEO -->/,
+        injectedMeta
+      );
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.send(html);
+  } catch (err) {
+    console.error('[SEO] Failed to inject dynamic meta:', err);
+    return next();
+  }
+});
 
 // ─── Production: Serve static frontend + SEO-injected store/product pages ──────
 if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
   const distPath = path.resolve(process.cwd(), 'dist');
-  const fs = await import('node:fs/promises');
 
   // Serve static assets (JS, CSS, images, etc.)
   app.use(express.static(distPath));
 
-  // SEO catch-all: inject dynamic meta for /s/:slug and /store/:slug routes
-  app.use(async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (req.path.startsWith('/api')) return next();
-
-    // Match /s/:slug, /store/:slug, /s/:slug/p/:productId, /store/:slug/p/:productId
-    const match = req.path.match(/^\/(?:s|store)\/([^/]+)(?:\/p\/([^/]+))?\/?$/);
-    if (match) {
-      const slug = match[1];
-      const productId = match[2];
-      try {
-        const siteUrl = process.env.SITE_URL || process.env.VITE_SITE_URL || `https://${req.get('host')}`;
-        const stores = await query<any>('SELECT * FROM stores WHERE slug = $1 AND active = true LIMIT 1', [slug]);
-        if (stores.length > 0) {
-          let html = await fs.readFile(path.join(distPath, 'index.html'), 'utf-8');
-          let injectedMeta = buildStoreMeta(stores[0], siteUrl);
-
-          if (productId) {
-            const products = await query<any>('SELECT * FROM products WHERE id = $1 AND store_id = $2 LIMIT 1', [productId, stores[0].id]);
-            if (products.length > 0) {
-              injectedMeta = buildProductMeta(stores[0], products[0], siteUrl);
-            }
-          }
-
-          html = html.replace(
-            /<!-- SEO: base\/fallback meta tags[^]*?-->/,
-            injectedMeta
-          );
-          res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-          res.setHeader('Cache-Control', 'public, max-age=300');
-          return res.send(html);
-        }
-      } catch (err) {
-        console.error('[SEO] Failed to inject dynamic meta:', err);
-      }
-    }
-
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
